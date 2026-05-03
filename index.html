@@ -177,6 +177,14 @@
         localStorage.setItem('nex_templates', JSON.stringify(templates));
       }, [cards, templates]);
 
+      // NEU: Automatischer Fallback auf "Alle", falls der aktuelle Tab wegkonvertiert oder gelöscht wurde
+      useEffect(() => {
+        const currentCats = [...new Set(cards.filter(c => !c.isGifted && !c.isRedeemed).map(c => CATEGORIES[c.category] ? c.category : 'custom'))];
+        if (activeCategoryTab !== 'all' && !currentCats.includes(activeCategoryTab)) {
+          setActiveCategoryTab('all');
+        }
+      }, [cards, activeCategoryTab]);
+
       useEffect(() => {
         const today = new Date().toISOString().split('T')[0];
         setCards(prevCards => {
@@ -573,11 +581,15 @@
 
     function WalletCard({ card, onPartialRedeem, onFullRedeem, onToggleGift, onEdit, onFullscreen, onRestore, onDelete, formatCurrency, isArchivedView }) {
       const [showDelConfirm, setShowDelConfirm] = useState(false);
+      
       const isCoupon = card.category === 'coupon';
       const isTicket = card.category === 'ticket';
       const canRedeem = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canRedeem);
       const canGift = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canGift);
       const percentLeft = card.initialValue > 0 ? (card.currentValue / card.initialValue) * 100 : 0;
+      
+      // Nur Werte anzeigen, wenn es auch zur Kategorie passt (Ticket + Loyalty verbergen die Werte!)
+      const showValueBlock = isCoupon || (card.category === 'custom' && card.customOptions?.canRedeem);
 
       const renderDate = (dateStr) => {
         if (!dateStr) return '';
@@ -615,17 +627,21 @@
               )}
             </div>
           </div>
-          {(card.initialValue > 0 || isCoupon) && (
+          
+          {showValueBlock && (
             <div className="px-6 pb-6 pt-2">
               <div className="flex justify-between items-end mb-2">
                 <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Restwert</span>
                 <span className="text-3xl font-bold">{formatCurrency(card.currentValue || 0)}</span>
               </div>
-              <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden shadow-inner">
-                <div className="bg-white h-full rounded-full transition-all duration-1000" style={{ width: `${percentLeft}%` }}></div>
-              </div>
+              {card.initialValue > 0 && (
+                  <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden shadow-inner">
+                    <div className="bg-white h-full rounded-full transition-all duration-1000" style={{ width: `${percentLeft}%` }}></div>
+                  </div>
+              )}
             </div>
           )}
+          
           {isArchivedView && (
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rotate-[-12deg] border-4 border-white/60 rounded-2xl px-6 py-2 z-20 pointer-events-none">
               <span className="text-4xl font-black text-white/60 uppercase tracking-tighter">{card.isRedeemed ? 'Eingelöst' : 'Verschenkt'}</span>
@@ -634,12 +650,17 @@
           
           {!isArchivedView && (canRedeem || canGift) && (
             <div className="bg-white/10 backdrop-blur-md flex justify-between p-3 border-t border-white/20 relative z-10">
-              {canRedeem && card.currentValue > 0 && (
-                <button onClick={(e) => { e.stopPropagation(); if (isTicket || !card.initialValue) onFullRedeem(); else onPartialRedeem(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold active:bg-white/40 shadow-lg">
+              {canRedeem && card.currentValue > 0 && showValueBlock && (
+                <button onClick={(e) => { e.stopPropagation(); onPartialRedeem(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold active:bg-white/40 shadow-lg">
                   <MinusCircle size={16} /><span>Einlösen</span>
                 </button>
               )}
-              {canGift && (card.currentValue === card.initialValue || !card.initialValue) && (
+              {canRedeem && (!showValueBlock || card.currentValue === 0) && (
+                 <button onClick={(e) => { e.stopPropagation(); onFullRedeem(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold active:bg-white/40 shadow-lg">
+                  <MinusCircle size={16} /><span>Einlösen</span>
+                </button>
+              )}
+              {canGift && (!showValueBlock || card.currentValue === card.initialValue || !card.initialValue) && (
                 <button onClick={(e) => { e.stopPropagation(); onToggleGift(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold ml-auto shadow-lg">
                   <Archive size={16} /><span>Verschenken</span>
                 </button>
@@ -671,8 +692,9 @@
     }
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
-      const catData = CATEGORIES[category] || CATEGORIES['custom'];
-
+      // HIER WIRD NUN ALLES DYNAMISCH ÜBER formData GESTEUERT!
+      const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
+      
       const [formData, setFormData] = useState({
         title: initialData?.title || '', 
         description: initialData?.description || '', 
@@ -683,7 +705,7 @@
         codeValue: initialData?.codeValue || '', 
         colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
         category: category || 'custom', 
-        expiryDate: initialData?.expiryDate || '',
+        expiryDate: initialData ? (initialData.expiryDate || '') : defaultExpiry,
         pin: initialData?.pin || '',
         customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
       });
@@ -695,19 +717,30 @@
       const [showPinField, setShowPinField] = useState(!!initialData?.pin);
 
       const colors = ['from-blue-500 to-indigo-600', 'from-orange-400 to-red-500', 'from-emerald-400 to-teal-500', 'from-pink-500 to-rose-600', 'from-gray-700 to-gray-900', 'from-yellow-400 to-orange-500'];
+      
+      // Nutzt das dynamische formData.category für die Anzeige!
+      const catData = CATEGORIES[formData.category] || CATEGORIES['custom'];
 
       const saveAction = () => {
         if (!formData.title) return alert('Bitte gib zumindest einen Titel ein.');
-        const parsedInit = parseFloat(String(formData.initialValue).replace(',', '.'));
-        const initVal = isNaN(parsedInit) ? 0 : parsedInit;
-        const parsedCurr = parseFloat(String(formData.currentValue).replace(',', '.'));
-        const currVal = isNaN(parsedCurr) ? initVal : parsedCurr;
+        let initVal = isNaN(parseFloat(String(formData.initialValue).replace(',', '.'))) ? 0 : parseFloat(String(formData.initialValue).replace(',', '.'));
+        let currVal = isNaN(parseFloat(String(formData.currentValue).replace(',', '.'))) ? initVal : parseFloat(String(formData.currentValue).replace(',', '.'));
+        
+        // Werte auf 0 setzen, wenn sie nicht unterstützt werden
+        if (formData.category === 'ticket' || formData.category === 'loyalty' || (formData.category === 'custom' && !formData.customOptions.canRedeem)) {
+            initVal = 0;
+            currVal = 0;
+        }
+
+        let finalExpiry = formData.expiryDate;
+        if (formData.category === 'loyalty') finalExpiry = '';
         
         onSave({ 
           ...formData, 
           id: initialData?.id, 
           initialValue: initVal, 
           currentValue: currVal, 
+          expiryDate: finalExpiry,
           category: formData.category 
         });
       };
@@ -735,7 +768,7 @@
       return (
         <div className="flex flex-col w-full h-full pb-safe">
           <div id="reader-hidden" style={{display:'none'}}></div>
-          <div className={`p-6 pt-8 text-white bg-gradient-to-br ${formData.colorCode} flex-shrink-0`}>
+          <div className={`p-6 pt-8 text-white bg-gradient-to-br ${formData.colorCode} flex-shrink-0 transition-colors duration-500`}>
             <div className="flex justify-between items-center mb-6">
               <button onClick={onCancel} className="p-2 bg-white/20 rounded-full backdrop-blur-md"><X size={20} /></button>
               <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : catData.label}</span>
@@ -747,7 +780,6 @@
 
           <div className="p-6 space-y-6 flex-1 bg-white dark:bg-gray-800">
             
-            {/* NEU: Kategorie im Nachhinein wechseln */}
             <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-2xl border border-gray-200 dark:border-gray-600">
               <div className="flex justify-between items-center">
                 <label className="text-xs font-bold text-gray-400 dark:text-gray-400 uppercase">Kategorie / Typ</label>
@@ -759,8 +791,9 @@
               </div>
             </div>
 
+            {/* DYNAMISCHES AUSBLENDEN BEI KONVERTIERUNG */}
             {(formData.category === 'coupon' || (formData.category === 'custom' && formData.customOptions.canRedeem)) && (
-              <div className="flex space-x-4">
+              <div className="flex space-x-4 animate-in fade-in slide-in-from-top-2">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Ursprungswert (€)</label>
                   <input type="text" inputMode="decimal" pattern="[0-9]*" className="w-full bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg" value={formData.initialValue} onChange={(e) => setFormData({...formData, initialValue: e.target.value, currentValue: initialData && initialData.id ? formData.currentValue : e.target.value})} />
