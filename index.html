@@ -65,7 +65,6 @@
       }
     }
 
-    /* Padding-Top perfekt abgestimmt: Karte rutscht unter Header, aber klebt nicht daran */
     .main-content {
       padding-top: max(130px, env(safe-area-inset-top) + 110px);
       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
@@ -156,11 +155,11 @@
         return saved ? JSON.parse(saved) : [];
       });
 
-      // Navigation & Modals
       const [currentView, setCurrentView] = useState('wallet'); 
+      const [previousView, setPreviousView] = useState('wallet'); 
       const [activeCategoryTab, setActiveCategoryTab] = useState('all'); 
       
-      const [isCreatorOpen, setIsCreatorOpen] = useState(false); // NEU: Steuert das Modal
+      const [isCreatorOpen, setIsCreatorOpen] = useState(false); 
       const [editingCard, setEditingCard] = useState(null); 
       const [selectedCategory, setSelectedCategory] = useState('custom');
 
@@ -176,6 +175,12 @@
       }, [cards, templates]);
 
       useEffect(() => {
+        const today = new Date().toISOString().split('T')[0];
+        setCards(prevCards => {
+          const validCards = prevCards.filter(c => !c.expiryDate || c.expiryDate >= today);
+          return validCards.length !== prevCards.length ? validCards : prevCards;
+        });
+
         if ('serviceWorker' in navigator) {
           const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(res => res || fetch(e.request))); });`;
           const blob = new Blob([swCode], {type: 'application/javascript'});
@@ -204,6 +209,7 @@
             title: params.get('title') || '', description: params.get('desc') || '',
             initialValue: params.get('val') || '', codeValue: params.get('code') || '',
             codeType: params.get('type') || 'BARCODE', category: params.get('cat') || 'coupon',
+            expiryDate: params.get('expiry') || '',
             customOptions: { canRedeem: true, canGift: true }
           };
           setEditingCard(shortcutCard); 
@@ -280,7 +286,7 @@
       const openEditor = (card) => {
         setEditingCard(card);
         setSelectedCategory(card.category || 'custom');
-        setIsCreatorOpen(true); // Öffnet das Pop-Up
+        setIsCreatorOpen(true);
       };
 
       const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
@@ -391,7 +397,7 @@
             )}
 
             {currentView === 'category-select' && (
-              <div className="space-y-8 animate-in fade-in mt-2">
+              <div className="space-y-8 animate-in fade-in mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   {Object.values(CATEGORIES).map(cat => (
                     <button key={cat.id} onClick={() => { setSelectedCategory(cat.id); setEditingCard(null); setIsCreatorOpen(true); }} className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col items-center active:scale-95 transition">
@@ -420,7 +426,6 @@
             )}
           </main>
 
-          {/* DAS MODALE POP-UP ZUM BEARBEITEN/ERSTELLEN (Bottom Sheet) */}
           {isCreatorOpen && (
             <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in" onClick={() => setIsCreatorOpen(false)}>
               <div 
@@ -435,7 +440,7 @@
                       setCards(cards.map(c => c.id === newCard.id ? newCard : c));
                     } else {
                       setCards([...cards, { ...newCard, id: Date.now().toString() }]);
-                      setCurrentView('wallet'); // Leitet nach erfolgreichem NEUEN Erstellen zum Wallet
+                      setCurrentView('wallet'); 
                       setActiveCategoryTab('all');
                     }
                     setIsCreatorOpen(false);
@@ -449,7 +454,6 @@
             </div>
           )}
 
-          {/* LIQUID NAVIGATION */}
           <nav className={`liquid-nav ${hideNav ? 'nav-hidden' : ''}`}>
             <div onClick={() => { setIsCreatorOpen(false); setActiveCategoryTab('all'); setCurrentView('wallet'); }} className={`nav-item ${currentView === 'wallet' ? 'active' : ''}`}>
               <Wallet size={18} /><span>Wallet</span>
@@ -523,9 +527,18 @@
             <div className="flex-1 pr-4">
               <h2 className="text-2xl font-bold tracking-tight leading-tight">{card.title}</h2>
               <p className="text-white/80 font-medium mt-1">{card.description}</p>
+              {card.expiryDate && (
+                <p className="text-white/90 font-bold text-sm mt-2 flex items-center gap-1">
+                  {card.category === 'ticket' ? '📅 ' : '⏳ '} 
+                  {new Date(card.expiryDate).toLocaleDateString('de-DE')}
+                </p>
+              )}
             </div>
             <div className="flex flex-col items-end space-y-3">
                <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-2 bg-white/20 rounded-full backdrop-blur-md transition"><Edit2 size={16} className="text-white" /></button>
+              {card.image && (
+                <div className="w-14 h-14 bg-white rounded-2xl p-1 shadow-lg border border-white/50"><img src={card.image} alt="Logo" className="w-full h-full rounded-xl object-cover" /></div>
+              )}
             </div>
           </div>
           {(card.initialValue > 0 || isCoupon) && (
@@ -584,12 +597,21 @@
     }
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
+      // BERECHNET DEN STANDARD-ABLAUF FÜR GUTSCHEINE (3 Jahre am 31.12.)
+      const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
+
       const [formData, setFormData] = useState({
-        title: initialData?.title || '', description: initialData?.description || '', image: initialData?.image || null, 
+        title: initialData?.title || '', 
+        description: initialData?.description || '', 
+        image: initialData?.image || null, 
         initialValue: initialData?.initialValue !== undefined ? initialData.initialValue : '', 
         currentValue: initialData?.currentValue !== undefined ? initialData.currentValue : '', 
-        codeType: initialData?.codeType || 'BARCODE', codeValue: initialData?.codeValue || '', colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
-        category: category, customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
+        codeType: initialData?.codeType || 'BARCODE', 
+        codeValue: initialData?.codeValue || '', 
+        colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
+        category: category, 
+        expiryDate: initialData ? (initialData.expiryDate || '') : defaultExpiry,
+        customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
       });
       const [isScanning, setIsScanning] = useState(false);
       const [showDel, setShowDel] = useState(false);
@@ -642,7 +664,7 @@
               <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
             </div>
             <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
-            <input type="text" placeholder={category === 'ticket' ? 'Datum / Info' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-2" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
+            <input type="text" placeholder={category === 'ticket' ? 'Infos / Platz' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-2" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
           </div>
 
           <div className="p-6 space-y-6 flex-1 bg-white dark:bg-gray-800">
@@ -661,6 +683,13 @@
               </div>
             )}
 
+            <div>
+              <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">
+                {category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'} (Optional)
+              </label>
+              <input type="date" className="w-full bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg font-sans" value={formData.expiryDate} onChange={(e) => setFormData({...formData, expiryDate: e.target.value})} />
+            </div>
+
             {category === 'custom' && (
               <div className="space-y-3 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
                 <button onClick={() => setFormData({...formData, customOptions: {...formData.customOptions, canRedeem: !formData.customOptions.canRedeem}})} className="flex items-center gap-3 w-full">
@@ -674,6 +703,16 @@
 
             <div><label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Farbe</label>
             <div className="flex flex-wrap gap-3">{colors.map(c => <button key={c} onClick={() => setFormData({...formData, colorCode: c})} className={`w-10 h-10 rounded-full bg-gradient-to-br ${c} ${formData.colorCode === c ? 'ring-2 ring-black dark:ring-white ring-offset-2 dark:ring-offset-gray-800' : ''}`} />)}</div></div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Logo</label>
+              <label className="flex items-center justify-between w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition">
+                {formData.image ? (
+                   <div className="flex items-center space-x-4"><div className="w-12 h-12 bg-white rounded-xl p-1 shadow-sm border border-gray-200"><img src={formData.image} alt="Preview" className="w-full h-full rounded-lg object-cover" /></div><span className="text-sm font-semibold text-green-600">Bild geladen (Ändern)</span></div>
+                ) : ( <div className="flex items-center space-x-2 text-gray-500 dark:text-gray-400"><Upload size={18} /><span className="font-semibold">Logo wählen</span></div> )}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files[0]; if(f){ const r = new FileReader(); r.onloadend=()=>setFormData({...formData, image: r.result}); r.readAsDataURL(f); } }} />
+              </label>
+            </div>
 
             <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-2xl border border-gray-200 dark:border-gray-600">
               <div className="flex justify-between items-center mb-3">
