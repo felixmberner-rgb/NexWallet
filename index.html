@@ -1,1 +1,613 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <!-- WICHTIG FÜR iOS: Diese Tags machen die Website zur echten App -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="NexWallet">
+  <title>NexWallet</title>
 
+  <!-- Tailwind CSS für das Styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Bibliotheken für Scanner und Codes (werden global an window angehängt) -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+  <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+
+  <!-- Babel für das Übersetzen des React JSX Codes im Browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Import Map für React und Lucide Icons, damit ES Modules im Browser funktionieren -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18",
+        "react-dom/client": "https://esm.sh/react-dom@18/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.294.0"
+      }
+    }
+  </script>
+
+  <style>
+    /* iOS spezifische Anpassungen */
+    body { -webkit-tap-highlight-color: transparent; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    
+    /* Support für den Notch-Bereich (Safe Area) bei modernen iPhones */
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+    .pt-safe { padding-top: env(safe-area-inset-top); }
+  </style>
+</head>
+<body class="bg-black"> <!-- Schwarzer Hintergrund für den Überlauf beim Scrollen (Overscroll) -->
+  <div id="root"></div>
+
+  <!-- HIER STARTET DIE EIGENTLICHE APP -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { 
+      PlusCircle, Wallet, Archive, Upload, Download, X, Check,
+      MinusCircle, CreditCard, RefreshCcw, Image as ImageIcon,
+      Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square
+    } from 'lucide-react';
+
+    const CATEGORIES = {
+      coupon: { id: 'coupon', label: 'Gutschein', icon: Tag, color: 'text-orange-500', bg: 'bg-orange-100' },
+      loyalty: { id: 'loyalty', label: 'Mitgliedskarte', icon: Star, color: 'text-purple-500', bg: 'bg-purple-100' },
+      ticket: { id: 'ticket', label: 'Ticket', icon: Ticket, color: 'text-blue-500', bg: 'bg-blue-100' },
+      custom: { id: 'custom', label: 'Sonstiges', icon: Shapes, color: 'text-gray-500', bg: 'bg-gray-200' }
+    };
+
+    function NexWallet() {
+      const [cards, setCards] = useState(() => {
+        const saved = localStorage.getItem('nex_cards');
+        return saved ? JSON.parse(saved) : [];
+      });
+      const [templates, setTemplates] = useState(() => {
+        const saved = localStorage.getItem('nex_templates');
+        return saved ? JSON.parse(saved) : [];
+      });
+
+      const [currentView, setCurrentView] = useState('wallet'); 
+      const [previousView, setPreviousView] = useState('wallet'); 
+      const [activeCategoryTab, setActiveCategoryTab] = useState('all'); 
+      const [editingCard, setEditingCard] = useState(null); 
+      const [selectedCategory, setSelectedCategory] = useState('custom');
+      const [redeemModal, setRedeemModal] = useState({ isOpen: false, cardId: null });
+      const [redeemAmount, setRedeemAmount] = useState('');
+      const [fullscreenCode, setFullscreenCode] = useState(null);
+      const [toast, setToast] = useState(null);
+
+      useEffect(() => {
+        localStorage.setItem('nex_cards', JSON.stringify(cards));
+        localStorage.setItem('nex_templates', JSON.stringify(templates));
+      }, [cards, templates]);
+
+      useEffect(() => {
+        // Registrierung Service Worker (Macht die App Offline-Fähig)
+        if ('serviceWorker' in navigator) {
+          const swCode = `
+            self.addEventListener('fetch', (event) => {
+              event.respondWith(caches.match(event.request).then(res => res || fetch(event.request)));
+            });
+          `;
+          const blob = new Blob([swCode], {type: 'application/javascript'});
+          navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('action') === 'create') {
+          const shortcutCard = {
+            title: params.get('title') || '',
+            description: params.get('desc') || '',
+            initialValue: params.get('val') || '',
+            codeValue: params.get('code') || '',
+            codeType: params.get('type') || 'BARCODE',
+            category: params.get('cat') || 'coupon',
+            customOptions: { canRedeem: true, canGift: true }
+          };
+          setEditingCard(shortcutCard);
+          setSelectedCategory(shortcutCard.category);
+          setPreviousView('wallet');
+          setCurrentView('creator');
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (cards.length === 0) {
+          setCards([
+            {
+              id: '1', title: 'Kino Gutschein', description: 'Gilt für alle Filme', image: null,
+              initialValue: 30.00, currentValue: 15.00, codeType: 'BARCODE', codeValue: '202666825915', 
+              category: 'coupon', isGifted: false, isRedeemed: false, colorCode: 'from-orange-400 to-red-500'
+            }
+          ]);
+        }
+      }, []);
+
+      const showToast = (msg) => {
+        setToast(msg);
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      const handlePartialRedeem = () => {
+        const amount = parseFloat(redeemAmount.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) return;
+
+        setCards(cards.map(card => {
+          if (card.id === redeemModal.cardId) {
+            const newValue = Math.max(0, card.currentValue - amount);
+            return { ...card, currentValue: newValue, isRedeemed: newValue === 0 };
+          }
+          return card;
+        }));
+        setRedeemModal({ isOpen: false, cardId: null });
+        setRedeemAmount('');
+      };
+
+      const handleFullRedeem = (cardId) => {
+        if(window.confirm("Möchtest du dieses Element komplett einlösen? Es wird danach ins Archiv verschoben.")) {
+          setCards(cards.map(card => card.id === cardId ? { ...card, isRedeemed: true, currentValue: 0 } : card));
+        }
+      };
+
+      const toggleGifted = (id) => {
+        setCards(cards.map(card => card.id === id ? { ...card, isGifted: !card.isGifted } : card));
+      };
+
+      const deleteTemplate = (id, e) => {
+        e.stopPropagation();
+        if(window.confirm("Vorlage wirklich löschen?")) {
+           setTemplates(templates.filter(t => t.id !== id));
+           showToast("Vorlage gelöscht");
+        }
+      };
+
+      const importData = (event) => {
+        const files = event.target.files;
+        if (!files.length) return;
+
+        Array.from(files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const data = JSON.parse(e.target.result);
+              const list = Array.isArray(data) ? data : [data];
+              setCards(prev => {
+                const existingIds = new Set(prev.map(c => c.id));
+                const fresh = list.filter(c => !existingIds.has(c.id));
+                return [...prev, ...fresh];
+              });
+            } catch(err) {}
+          };
+          reader.readAsText(file);
+        });
+        setTimeout(() => showToast("Import abgeschlossen"), 500);
+      };
+
+      const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
+      const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
+      const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
+
+      return (
+        <div className="h-screen w-full bg-gray-100 font-sans text-gray-900 flex flex-col overflow-hidden select-none pt-safe">
+          
+          <header className="flex-none bg-white/95 backdrop-blur-xl border-b border-gray-200 pt-8 pb-2 px-5 z-40">
+            <div className="flex justify-between items-center pb-2">
+              <h1 className="text-2xl font-bold tracking-tight">
+                {currentView === 'wallet' && 'NexWallet'}
+                {currentView === 'gifted' && 'Archiv'}
+                {currentView === 'category-select' && 'Art wählen'}
+                {currentView === 'creator' && (editingCard && editingCard.id ? 'Bearbeiten' : CATEGORIES[selectedCategory].label)}
+              </h1>
+              {(currentView === 'wallet' || currentView === 'gifted') && (
+                <div className="flex space-x-2">
+                  <label className="cursor-pointer p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition active:scale-90">
+                    <Upload size={18} className="text-gray-700" />
+                    <input type="file" multiple accept=".nexwallet,.json" className="hidden" onChange={importData} />
+                  </label>
+                  <button onClick={() => {
+                    const blob = new Blob([JSON.stringify(cards)], {type: 'application/json'});
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob); a.download = `NexWallet_Export.nexwallet`; a.click();
+                  }} className="p-2 bg-blue-50 rounded-full hover:bg-blue-100 transition active:scale-90">
+                    <Download size={18} className="text-blue-600" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {currentView === 'wallet' && (
+              <div className="pt-2 pb-1 overflow-x-auto hide-scrollbar flex space-x-2">
+                <button 
+                  onClick={() => setActiveCategoryTab('all')}
+                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === 'all' ? 'bg-black text-white' : 'bg-gray-200 text-gray-500'}`}
+                >
+                  Alle
+                </button>
+                {presentCategories.map(cat => (
+                  <button 
+                    key={cat}
+                    onClick={() => setActiveCategoryTab(cat)}
+                    className={`whitespace-nowrap flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === cat ? 'bg-black text-white' : 'bg-gray-200 text-gray-500'}`}
+                  >
+                    {React.createElement(CATEGORIES[cat].icon, { size: 14 })}
+                    {CATEGORIES[cat].label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </header>
+
+          {toast && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-gray-800 text-white px-6 py-3 rounded-full text-sm font-bold shadow-2xl animate-in fade-in slide-in-from-top-4">
+              {toast}
+            </div>
+          )}
+
+          <main className="flex-1 overflow-y-auto px-4 pt-6 pb-24">
+            {currentView === 'wallet' && (
+              <div className="space-y-6">
+                {activeCards.length === 0 ? (
+                  <div className="text-center text-gray-400 mt-20">Keine Karten vorhanden.</div>
+                ) : (
+                  activeCards.filter(c => activeCategoryTab === 'all' || (c.category || 'custom') === activeCategoryTab).map(card => (
+                    <WalletCard 
+                      key={card.id} card={card} 
+                      onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
+                      onFullRedeem={() => handleFullRedeem(card.id)}
+                      onToggleGift={() => toggleGifted(card.id)}
+                      onEdit={() => { setPreviousView('wallet'); setEditingCard(card); setSelectedCategory(card.category); setCurrentView('creator'); }}
+                      onFullscreen={() => setFullscreenCode(card)}
+                      formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {currentView === 'gifted' && (
+              <div className="space-y-6">
+                {archivedCards.length === 0 ? (
+                  <div className="text-center text-gray-400 mt-32">
+                    <Archive size={48} className="mx-auto mb-4 opacity-30" />
+                    <p>Aktuell sind keine Karten archiviert.</p>
+                  </div>
+                ) : (
+                  archivedCards.map(card => (
+                    <div key={card.id} className="opacity-75 grayscale hover:grayscale-0 transition-all duration-300">
+                      <WalletCard 
+                        card={card} 
+                        onToggleGift={() => toggleGifted(card.id)}
+                        onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
+                        onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
+                        formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
+                        isArchivedView={true}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {currentView === 'category-select' && (
+              <div className="space-y-8 animate-in slide-in-from-bottom-6">
+                <div className="grid grid-cols-2 gap-4">
+                  {Object.values(CATEGORIES).map(cat => (
+                    <button key={cat.id} onClick={() => { setSelectedCategory(cat.id); setCurrentView('creator'); }} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 flex flex-col items-center active:scale-95 transition">
+                      <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 ${cat.bg} ${cat.color}`}><cat.icon size={28} /></div>
+                      <span className="font-bold text-gray-800 text-sm">{cat.label}</span>
+                    </button>
+                  ))}
+                </div>
+                {templates.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4 ml-2">Vorlagen</h3>
+                    <div className="space-y-3">
+                      {templates.map(tmpl => (
+                        <div key={tmpl.id} onClick={() => { setEditingCard({...tmpl, id: null, currentValue: tmpl.initialValue}); setSelectedCategory(tmpl.category); setCurrentView('creator'); }} className="w-full flex items-center justify-between p-4 bg-white rounded-2xl shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${CATEGORIES[tmpl.category].bg} ${CATEGORIES[tmpl.category].color}`}>{React.createElement(CATEGORIES[tmpl.category].icon, { size: 18 })}</div>
+                            <p className="font-bold text-gray-800">{tmpl.title}</p>
+                          </div>
+                          <button onClick={(e) => deleteTemplate(tmpl.id, e)} className="p-2 text-red-400 hover:text-red-600 bg-red-50 rounded-full"><Trash2 size={16} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            )}
+
+            {currentView === 'creator' && (
+              <CardCreator 
+                initialData={editingCard}
+                category={selectedCategory}
+                onSave={(newCard) => {
+                  if (editingCard && editingCard.id) setCards(cards.map(c => c.id === newCard.id ? newCard : c));
+                  else setCards([...cards, { ...newCard, id: Date.now().toString() }]);
+                  setCurrentView(editingCard && editingCard.id ? previousView : 'wallet');
+                  setEditingCard(null);
+                }} 
+                onSaveTemplate={(tmpl) => { setTemplates([...templates, {...tmpl, id: Date.now().toString()}]); showToast("Vorlage gespeichert!"); }}
+                onCancel={() => { setCurrentView(editingCard && editingCard.id ? previousView : 'category-select'); setEditingCard(null); }}
+                onDelete={editingCard && editingCard.id ? () => { setCards(cards.filter(c => c.id !== editingCard.id)); setCurrentView(previousView); setEditingCard(null); } : null}
+              />
+            )}
+          </main>
+
+          <nav className="flex-none bg-white/90 backdrop-blur-2xl border-t border-gray-200 h-16 flex justify-around items-center px-4 pb-safe z-50">
+            <button onClick={() => setCurrentView('wallet')} className={`flex flex-col items-center justify-center w-20 h-full ${currentView === 'wallet' ? 'text-blue-600' : 'text-gray-400'}`}>
+              <Wallet size={22} className="mb-1" /><span className="text-[10px] font-medium">Wallet</span>
+            </button>
+            <button onClick={() => { setPreviousView(currentView); setEditingCard(null); setCurrentView('category-select'); }} className={`flex flex-col items-center justify-center w-20 h-full ${(currentView === 'creator' || currentView === 'category-select') && !editingCard ? 'text-blue-600' : 'text-gray-400'}`}>
+              <PlusCircle size={22} className="mb-1" /><span className="text-[10px] font-medium">Neu</span>
+            </button>
+            <button onClick={() => setCurrentView('gifted')} className={`flex flex-col items-center justify-center w-20 h-full ${currentView === 'gifted' ? 'text-blue-600' : 'text-gray-400'}`}>
+              <Archive size={22} className="mb-1" /><span className="text-[10px] font-medium">Archiv</span>
+            </button>
+          </nav>
+
+          {fullscreenCode && (
+            <div className="fixed inset-0 z-[200] bg-white flex items-center justify-center animate-in zoom-in-95 duration-200" onClick={() => setFullscreenCode(null)}>
+              <button className="absolute top-12 right-6 p-3 bg-gray-100 rounded-full text-black z-50"><X size={28} /></button>
+              <div className="transform rotate-90 flex flex-col items-center justify-center">
+                <LocalCodeGenerator type={fullscreenCode.codeType} value={fullscreenCode.codeValue} className={fullscreenCode.codeType === 'QR' ? 'w-[40vh] h-[40vh]' : 'w-[75vh] h-[25vh]'} />
+                <p className="text-2xl font-mono mt-8 text-black tracking-widest">{fullscreenCode.codeValue}</p>
+              </div>
+            </div>
+          )}
+
+          {redeemModal.isOpen && (
+            <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl mb-8">
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold">Betrag abziehen</h3>
+                  <button onClick={() => setRedeemModal({isOpen: false, cardId: null})} className="p-2 bg-gray-100 rounded-full"><X size={20} /></button>
+                </div>
+                <div className="bg-gray-100 rounded-2xl p-4 mb-6 flex justify-between items-center text-2xl font-semibold">
+                  <span>-</span>
+                  <div className="flex items-center">
+                    <input type="text" inputMode="decimal" pattern="[0-9]*" value={redeemAmount} onChange={(e) => setRedeemAmount(e.target.value)} placeholder="0,00" className="bg-transparent text-right outline-none w-32 mr-2 font-bold text-red-500" autoFocus />
+                    <span>€</span>
+                  </div>
+                </div>
+                <button onClick={handlePartialRedeem} className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all">Bestätigen</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function LocalCodeGenerator({ type, value, className }) {
+      const canvasRef = useRef(null);
+      const svgRef = useRef(null);
+      useEffect(() => {
+        if (!value) return;
+        if (type === 'QR' && window.QRCode && canvasRef.current) {
+          window.QRCode.toCanvas(canvasRef.current, value, { width: 400, margin: 1 }, () => {});
+        } else if (type === 'BARCODE' && window.JsBarcode && svgRef.current) {
+          try { window.JsBarcode(svgRef.current, value, { format: "CODE128", displayValue: false, margin: 0, lineColor: "#000" }); } catch (err) {}
+        }
+      }, [type, value]);
+      if (type === 'QR') return <canvas ref={canvasRef} className={className} />;
+      return <svg ref={svgRef} className={`object-contain ${className}`} />;
+    }
+
+    function WalletCard({ card, onPartialRedeem, onFullRedeem, onToggleGift, onEdit, onFullscreen, onRestore, onDelete, formatCurrency, isArchivedView }) {
+      const [showDelConfirm, setShowDelConfirm] = useState(false);
+      const isCoupon = card.category === 'coupon';
+      const isTicket = card.category === 'ticket';
+      const canRedeem = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canRedeem);
+      const canGift = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canGift);
+      const percentLeft = card.initialValue > 0 ? (card.currentValue / card.initialValue) * 100 : 0;
+
+      return (
+        <div onClick={!isArchivedView ? onFullscreen : undefined} className={`relative w-full rounded-[2rem] shadow-xl overflow-hidden text-white bg-gradient-to-br ${card.colorCode || 'from-gray-700 to-gray-900'} transition-transform active:scale-[0.98]`}>
+          <div className="p-6 pb-4 flex justify-between items-start">
+            <div className="flex-1 pr-4">
+              <h2 className="text-2xl font-bold tracking-tight shadow-sm leading-tight">{card.title}</h2>
+              <p className="text-white/80 font-medium mt-1">{card.description}</p>
+            </div>
+            <div className="flex flex-col items-end space-y-3">
+               <button onClick={(e) => { e.stopPropagation(); onEdit(); }} className="p-2 bg-white/20 rounded-full backdrop-blur-md transition"><Edit2 size={16} className="text-white" /></button>
+              {card.image ? (
+                <div className="w-14 h-14 bg-white rounded-2xl p-1 shadow-lg border border-white/50"><img src={card.image} alt="Logo" className="w-full h-full rounded-xl object-cover" /></div>
+              ) : (
+                <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm border border-white/30"><CreditCard size={24} className="text-white drop-shadow-md" /></div>
+              )}
+            </div>
+          </div>
+          {(card.initialValue > 0 || isCoupon) && (
+            <div className="px-6 pb-6 pt-2">
+              <div className="flex justify-between items-end mb-2">
+                <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Restwert</span>
+                <span className="text-3xl font-bold">{formatCurrency(card.currentValue || 0)}</span>
+              </div>
+              <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden shadow-inner">
+                <div className="bg-white h-full rounded-full transition-all duration-1000" style={{ width: `${percentLeft}%` }}></div>
+              </div>
+            </div>
+          )}
+          {isArchivedView && (
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 rotate-[-12deg] border-4 border-white/60 rounded-2xl px-6 py-2 z-20 pointer-events-none">
+              <span className="text-4xl font-black text-white/60 uppercase tracking-tighter">{card.isRedeemed ? 'Eingelöst' : 'Verschenkt'}</span>
+            </div>
+          )}
+          
+          {!isArchivedView && (canRedeem || canGift) && (
+            <div className="bg-white/10 backdrop-blur-md flex justify-between p-3 border-t border-white/20 relative z-10">
+              {canRedeem && card.currentValue > 0 && (
+                <button onClick={(e) => { e.stopPropagation(); if (isTicket || !card.initialValue) onFullRedeem(); else onPartialRedeem(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold active:bg-white/40 shadow-lg">
+                  <MinusCircle size={16} /><span>Einlösen</span>
+                </button>
+              )}
+              {canGift && (card.currentValue === card.initialValue || !card.initialValue) && (
+                <button onClick={(e) => { e.stopPropagation(); onToggleGift(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold ml-auto shadow-lg">
+                  <Archive size={16} /><span>Verschenken</span>
+                </button>
+              )}
+            </div>
+          )}
+
+          {isArchivedView && (
+            <div className="bg-white/10 backdrop-blur-md flex justify-between items-center p-3 border-t border-white/20 relative z-10">
+              {!showDelConfirm ? (
+                 <>
+                   <button onClick={(e) => { e.stopPropagation(); setShowDelConfirm(true); }} className="flex items-center space-x-2 px-4 py-2 bg-red-500/80 text-white rounded-full text-sm font-bold shadow-lg">
+                     <Trash2 size={16} /><span>Löschen</span>
+                   </button>
+                   <button onClick={(e) => { e.stopPropagation(); if (card.isRedeemed) onRestore(); else onToggleGift(); }} className="flex items-center space-x-2 px-5 py-2.5 bg-white/20 text-white rounded-full text-sm font-bold shadow-lg ml-auto">
+                     <RefreshCcw size={16} /><span>Wiederherstellen</span>
+                   </button>
+                 </>
+              ) : (
+                 <div className="flex space-x-2 w-full animate-in fade-in slide-in-from-left-4">
+                   <button onClick={(e) => { e.stopPropagation(); setShowDelConfirm(false); }} className="flex-1 px-4 py-2 bg-white/20 text-white rounded-full text-sm font-bold">
+                     Abbrechen
+                   </button>
+                   <button onClick={(e) => { e.stopPropagation(); onDelete(); setShowDelConfirm(false); }} className="flex-1 px-4 py-2 bg-red-500 text-white rounded-full text-sm font-bold shadow-lg">
+                     Endgültig löschen
+                   </button>
+                 </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
+      const [formData, setFormData] = useState({
+        title: initialData?.title || '', 
+        description: initialData?.description || '', 
+        image: initialData?.image || null, 
+        initialValue: initialData?.initialValue !== undefined ? initialData.initialValue : '', 
+        currentValue: initialData?.currentValue !== undefined ? initialData.currentValue : '', 
+        codeType: initialData?.codeType || 'BARCODE', 
+        codeValue: initialData?.codeValue || '', 
+        colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
+        category: category, 
+        customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
+      });
+      const [isScanning, setIsScanning] = useState(false);
+      const [showDel, setShowDel] = useState(false);
+
+      const colors = ['from-blue-500 to-indigo-600', 'from-orange-400 to-red-500', 'from-emerald-400 to-teal-500', 'from-pink-500 to-rose-600', 'from-gray-700 to-gray-900', 'from-yellow-400 to-orange-500'];
+
+      const saveAction = () => {
+        if (!formData.title) return alert('Bitte gib zumindest einen Titel ein.');
+        const parsedInit = parseFloat(String(formData.initialValue).replace(',', '.'));
+        const initVal = isNaN(parsedInit) ? 0 : parsedInit;
+        const parsedCurr = parseFloat(String(formData.currentValue).replace(',', '.'));
+        const currVal = isNaN(parsedCurr) ? initVal : parsedCurr;
+        onSave({ ...formData, initialValue: initVal, currentValue: currVal, category: category });
+      };
+
+      const scanBarcode = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setIsScanning(true);
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = async () => {
+          let found = null;
+          if (window.ZXing) {
+            try { const reader = new window.ZXing.BrowserMultiFormatReader(); const res = await reader.decodeFromImageElement(img); found = res.text; } catch(e) {}
+          }
+          if (!found && 'BarcodeDetector' in window) {
+            try { const det = new window.BarcodeDetector(); const res = await det.detect(img); if (res.length) found = res[0].rawValue; } catch(e) {}
+          }
+          if (found) { setFormData({...formData, codeValue: found}); alert("Code erkannt!"); }
+          else alert("Kein Code gefunden. Versuche ein schärferes Bild.");
+          setIsScanning(false);
+        };
+      };
+
+      return (
+        <div className="bg-white rounded-3xl shadow-xl overflow-hidden slide-in-from-bottom-10 animate-in pb-4">
+          <div id="reader-hidden" style={{display:'none'}}></div>
+          <div className={`p-6 text-white bg-gradient-to-br ${formData.colorCode}`}>
+            <div className="flex justify-between items-center mb-4">
+              <button onClick={onCancel} className="p-2 bg-white/20 rounded-full backdrop-blur-md"><X size={20} /></button>
+              <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : CATEGORIES[category].label}</span>
+              <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
+            </div>
+            <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
+            <input type="text" placeholder={category === 'ticket' ? 'Datum / Info' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-4" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
+          </div>
+
+          <div className="p-6 space-y-6">
+            {(category === 'coupon' || (category === 'custom' && formData.customOptions.canRedeem)) && (
+              <div className="flex space-x-4">
+                <div className="flex-1">
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Ursprungswert (€)</label>
+                  <input type="text" inputMode="decimal" pattern="[0-9]*" className="w-full bg-gray-100 p-4 rounded-xl font-bold text-lg" value={formData.initialValue} onChange={(e) => setFormData({...formData, initialValue: e.target.value, currentValue: initialData ? formData.currentValue : e.target.value})} />
+                </div>
+                {initialData && initialData.id && (
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Restwert (€)</label>
+                    <input type="text" inputMode="decimal" pattern="[0-9]*" className="w-full bg-gray-100 p-4 rounded-xl font-bold text-lg" value={formData.currentValue} onChange={(e) => setFormData({...formData, currentValue: e.target.value})} />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {category === 'custom' && (
+              <div className="space-y-3 bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                <button onClick={() => setFormData({...formData, customOptions: {...formData.customOptions, canRedeem: !formData.customOptions.canRedeem}})} className="flex items-center gap-3 w-full">
+                  {formData.customOptions.canRedeem ? <CheckSquare className="text-blue-500" /> : <Square className="text-gray-400" />} <span>Einlösen möglich</span>
+                </button>
+                <button onClick={() => setFormData({...formData, customOptions: {...formData.customOptions, canGift: !formData.customOptions.canGift}})} className="flex items-center gap-3 w-full">
+                  {formData.customOptions.canGift ? <CheckSquare className="text-blue-500" /> : <Square className="text-gray-400" />} <span>Verschenken möglich</span>
+                </button>
+              </div>
+            )}
+
+            <div><label className="block text-xs font-bold text-gray-400 uppercase mb-2">Farbe</label>
+            <div className="flex flex-wrap gap-3">{colors.map(c => <button key={c} onClick={() => setFormData({...formData, colorCode: c})} className={`w-10 h-10 rounded-full bg-gradient-to-br ${c} ${formData.colorCode === c ? 'ring-2 ring-black ring-offset-2' : ''}`} />)}</div></div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Logo</label>
+              <label className="flex items-center justify-between w-full p-4 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:bg-gray-50 transition">
+                {formData.image ? (
+                   <div className="flex items-center space-x-4"><div className="w-12 h-12 bg-white rounded-xl p-1 shadow-sm border border-gray-200"><img src={formData.image} alt="Preview" className="w-full h-full rounded-lg object-cover" /></div><span className="text-sm font-semibold text-green-600">Bild geladen</span></div>
+                ) : ( <div className="flex items-center space-x-2 text-gray-500"><Upload size={18} /><span className="font-semibold">Logo wählen</span></div> )}
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files[0]; if(f){ const r = new FileReader(); r.onloadend=()=>setFormData({...formData, image: r.result}); r.readAsDataURL(f); } }} />
+              </label>
+            </div>
+
+            <div className="bg-gray-100 p-4 rounded-2xl border border-gray-200">
+              <div className="flex justify-between items-center mb-3">
+                <label className="text-xs font-bold text-gray-400 uppercase">Code</label>
+                <select className="bg-transparent font-bold text-sm" value={formData.codeType} onChange={(e) => setFormData({...formData, codeType: e.target.value})}>
+                  <option value="BARCODE">Barcode</option><option value="QR">QR Code</option>
+                </select>
+              </div>
+              <input type="text" placeholder="Code..." className="w-full bg-white p-3 rounded-xl mb-3 font-mono shadow-inner" value={formData.codeValue} onChange={(e) => setFormData({...formData, codeValue: e.target.value})} />
+              <label className={`flex items-center justify-center gap-2 w-full p-3 rounded-xl cursor-pointer ${isScanning ? 'bg-blue-200' : 'bg-gray-800 text-white active:scale-95 transition'}`}>
+                <ImageIcon size={18} /><span>Foto scannen</span>
+                <input type="file" accept="image/*" className="hidden" onChange={scanBarcode} />
+              </label>
+            </div>
+
+            <div className="pt-4 border-t border-gray-100 space-y-3">
+              <button onClick={() => onSaveTemplate(formData)} className="w-full flex justify-center items-center gap-2 bg-gray-100 p-4 rounded-xl font-bold active:scale-95 transition"><CopyPlus size={18} /> Vorlage speichern</button>
+              {initialData && initialData.id && onDelete && (
+                !showDel ? <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2"><Trash2 size={18}/> Karte löschen</button> :
+                <div className="flex gap-3 animate-in fade-in slide-in-from-right-4"><button onClick={() => setShowDel(false)} className="flex-1 p-4 bg-gray-100 rounded-xl font-bold">Abbrechen</button><button onClick={onDelete} className="flex-1 p-4 bg-red-500 text-white rounded-xl font-bold shadow-lg">Löschen</button></div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = createRoot(document.getElementById('root'));
+    root.render(<NexWallet />);
+  </script>
+</body>
+</html>
