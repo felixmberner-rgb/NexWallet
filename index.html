@@ -362,7 +362,7 @@
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
                       onToggleGift={() => toggleGifted(card.id)}
-                      onEdit={() => openEditor(card)}
+                      onEdit={() => { setPreviousView('wallet'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                     />
@@ -386,7 +386,7 @@
                         onToggleGift={() => toggleGifted(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
-                        onEdit={() => openEditor(card)}
+                        onEdit={() => { setPreviousView('gifted'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
                         formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                         isArchivedView={true}
                       />
@@ -597,7 +597,6 @@
     }
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
-      // BERECHNET DEN STANDARD-ABLAUF FÜR GUTSCHEINE (3 Jahre am 31.12.)
       const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
 
       const [formData, setFormData] = useState({
@@ -683,12 +682,16 @@
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">
-                {category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'} (Optional)
-              </label>
-              <input type="date" className="w-full bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg font-sans" value={formData.expiryDate} onChange={(e) => setFormData({...formData, expiryDate: e.target.value})} />
-            </div>
+            {/* HIER IST DIE LOGIK FÜR DAS DATUM (Nicht für Mitgliedskarten) */}
+            {category !== 'loyalty' && (
+              <div className="w-full">
+                <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">
+                  {category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'} (Optional)
+                </label>
+                {/* WICHTIG: block w-full box-border appearance-none korrigiert den iOS Bug */}
+                <input type="date" className="block w-full box-border appearance-none bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg font-sans" value={formData.expiryDate} onChange={(e) => setFormData({...formData, expiryDate: e.target.value})} />
+              </div>
+            )}
 
             {category === 'custom' && (
               <div className="space-y-3 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
