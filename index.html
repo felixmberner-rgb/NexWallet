@@ -40,7 +40,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0; padding: 0;
       -webkit-tap-highlight-color: transparent; 
-      background-color: #f3f4f6;
+      background-color: #f3f4f6; 
       color: #111827;
       overflow-x: hidden;
     }
@@ -65,9 +65,8 @@
       }
     }
 
-    /* Padding-Top vergrößert, damit die oberste Kachel nicht unter dem Header klebt */
     .main-content {
-      padding-top: max(150px, env(safe-area-inset-top) + 120px);
+      padding-top: max(110px, env(safe-area-inset-top) + 90px);
       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
       min-height: 100vh;
       box-sizing: border-box;
@@ -135,7 +134,7 @@
     import { createRoot } from 'react-dom/client';
     import { 
       PlusCircle, Wallet, Archive, Upload, Download, X, Check,
-      MinusCircle, RefreshCcw, Image as ImageIcon,
+      MinusCircle, CreditCard, RefreshCcw, Image as ImageIcon,
       Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square
     } from 'lucide-react';
 
@@ -156,11 +155,15 @@
         return saved ? JSON.parse(saved) : [];
       });
 
+      // View States
       const [currentView, setCurrentView] = useState('wallet'); 
-      const [previousView, setPreviousView] = useState('wallet'); 
       const [activeCategoryTab, setActiveCategoryTab] = useState('all'); 
+      
+      // NEU: Modal States für den Ersteller
+      const [isCreatorOpen, setIsCreatorOpen] = useState(false);
       const [editingCard, setEditingCard] = useState(null); 
       const [selectedCategory, setSelectedCategory] = useState('custom');
+
       const [redeemModal, setRedeemModal] = useState({ isOpen: false, cardId: null });
       const [redeemAmount, setRedeemAmount] = useState('');
       const [fullscreenCode, setFullscreenCode] = useState(null);
@@ -203,8 +206,9 @@
             codeType: params.get('type') || 'BARCODE', category: params.get('cat') || 'coupon',
             customOptions: { canRedeem: true, canGift: true }
           };
-          setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category);
-          setPreviousView('wallet'); setCurrentView('creator');
+          setEditingCard(shortcutCard); 
+          setSelectedCategory(shortcutCard.category);
+          setIsCreatorOpen(true);
           window.history.replaceState({}, document.title, window.location.pathname);
         }
 
@@ -272,11 +276,18 @@
         setTimeout(() => showToast("Import abgeschlossen"), 500);
       };
 
+      const openEditor = (card) => {
+        setEditingCard(card);
+        setSelectedCategory(card.category || 'custom');
+        setIsCreatorOpen(true);
+      };
+
       const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
       const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
-      const hideNav = isKeyboardOpen || fullscreenCode !== null;
+      // Leiste wird ausgeblendet wenn Tastatur offen, Code im Vollbild oder ein Modal offen ist
+      const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen;
 
       return (
         <div className="w-full">
@@ -286,7 +297,6 @@
                 {currentView === 'wallet' && 'NexWallet'}
                 {currentView === 'gifted' && 'Archiv'}
                 {currentView === 'category-select' && 'Neu erstellen'}
-                {currentView === 'creator' && (editingCard && editingCard.id ? 'Bearbeiten' : CATEGORIES[selectedCategory].label)}
               </h1>
               {(currentView === 'wallet' || currentView === 'gifted') && (
                 <div className="flex space-x-2">
@@ -345,7 +355,7 @@
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
                       onToggleGift={() => toggleGifted(card.id)}
-                      onEdit={() => { setPreviousView('wallet'); setEditingCard(card); setSelectedCategory(card.category); setCurrentView('creator'); }}
+                      onEdit={() => openEditor(card)}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                     />
@@ -369,6 +379,7 @@
                         onToggleGift={() => toggleGifted(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
+                        onEdit={() => openEditor(card)}
                         formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                         isArchivedView={true}
                       />
@@ -379,10 +390,10 @@
             )}
 
             {currentView === 'category-select' && (
-              <div className="space-y-8 animate-in slide-in-from-bottom-6">
+              <div className="space-y-8 animate-in fade-in mt-4">
                 <div className="grid grid-cols-2 gap-4">
                   {Object.values(CATEGORIES).map(cat => (
-                    <button key={cat.id} onClick={() => { setSelectedCategory(cat.id); setCurrentView('creator'); }} className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col items-center active:scale-95 transition">
+                    <button key={cat.id} onClick={() => { setSelectedCategory(cat.id); setEditingCard(null); setIsCreatorOpen(true); }} className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col items-center active:scale-95 transition">
                       <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-3 ${cat.bg} ${cat.color} dark:bg-opacity-20`}><cat.icon size={28} /></div>
                       <span className="font-bold text-gray-800 dark:text-gray-100 text-sm">{cat.label}</span>
                     </button>
@@ -393,7 +404,7 @@
                     <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4 ml-2">Vorlagen</h3>
                     <div className="space-y-3">
                       {templates.map(tmpl => (
-                        <div key={tmpl.id} onClick={() => { setEditingCard({...tmpl, id: null, currentValue: tmpl.initialValue}); setSelectedCategory(tmpl.category); setCurrentView('creator'); }} className="w-full flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition">
+                        <div key={tmpl.id} onClick={() => { setEditingCard({...tmpl, id: null, currentValue: tmpl.initialValue}); setSelectedCategory(tmpl.category); setIsCreatorOpen(true); }} className="w-full flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition">
                           <div className="flex items-center gap-3">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${CATEGORIES[tmpl.category].bg} ${CATEGORIES[tmpl.category].color} dark:bg-opacity-20`}>{React.createElement(CATEGORIES[tmpl.category].icon, { size: 18 })}</div>
                             <p className="font-bold text-gray-800 dark:text-gray-100">{tmpl.title}</p>
@@ -406,29 +417,40 @@
                 )}
               </div>
             )}
-
-            {currentView === 'creator' && (
-              <CardCreator 
-                initialData={editingCard}
-                category={selectedCategory}
-                onSave={(newCard) => {
-                  if (editingCard && editingCard.id) setCards(cards.map(c => c.id === newCard.id ? newCard : c));
-                  else setCards([...cards, { ...newCard, id: Date.now().toString() }]);
-                  setCurrentView(editingCard && editingCard.id ? previousView : 'wallet');
-                  setEditingCard(null);
-                }} 
-                onSaveTemplate={(tmpl) => { setTemplates([...templates, {...tmpl, id: Date.now().toString()}]); showToast("Vorlage gespeichert!"); }}
-                onCancel={() => { setCurrentView(editingCard && editingCard.id ? previousView : 'category-select'); setEditingCard(null); }}
-                onDelete={editingCard && editingCard.id ? () => { setCards(cards.filter(c => c.id !== editingCard.id)); setCurrentView(previousView); setEditingCard(null); } : null}
-              />
-            )}
           </main>
+
+          {/* DAS NEUE MODAL POP-UP (Bottom Sheet) */}
+          {isCreatorOpen && (
+            <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-md p-0 sm:p-4 animate-in fade-in" onClick={() => setIsCreatorOpen(false)}>
+              <div 
+                className="w-full max-w-lg max-h-[92vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-t-[2rem] sm:rounded-[2rem] shadow-2xl slide-in-from-bottom-8 flex flex-col" 
+                onClick={e => e.stopPropagation()} /* Verhindert Schließen beim Klick ins Menü */
+              >
+                <CardCreator 
+                  initialData={editingCard}
+                  category={selectedCategory}
+                  onSave={(newCard) => {
+                    if (editingCard && editingCard.id) setCards(cards.map(c => c.id === newCard.id ? newCard : c));
+                    else {
+                      setCards([...cards, { ...newCard, id: Date.now().toString() }]);
+                      setCurrentView('wallet'); // Leitet nur bei einer NEUEN Karte ins Wallet um
+                    }
+                    setIsCreatorOpen(false);
+                    setEditingCard(null);
+                  }} 
+                  onSaveTemplate={(tmpl) => { setTemplates([...templates, {...tmpl, id: Date.now().toString()}]); showToast("Vorlage gespeichert!"); }}
+                  onCancel={() => { setIsCreatorOpen(false); setEditingCard(null); }}
+                  onDelete={editingCard && editingCard.id ? () => { setCards(cards.filter(c => c.id !== editingCard.id)); setIsCreatorOpen(false); setEditingCard(null); } : null}
+                />
+              </div>
+            </div>
+          )}
 
           <nav className={`liquid-nav ${hideNav ? 'nav-hidden' : ''}`}>
             <div onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} className={`nav-item ${currentView === 'wallet' ? 'active' : ''}`}>
               <Wallet size={18} /><span>Wallet</span>
             </div>
-            <div onClick={() => { setPreviousView(currentView); setEditingCard(null); setCurrentView('category-select'); }} className={`nav-item ${(currentView === 'creator' || currentView === 'category-select') && !editingCard ? 'active' : ''}`}>
+            <div onClick={() => { setCurrentView('category-select'); }} className={`nav-item ${currentView === 'category-select' ? 'active' : ''}`}>
               <PlusCircle size={18} /><span>Neu</span>
             </div>
             <div onClick={() => setCurrentView('gifted')} className={`nav-item ${currentView === 'gifted' ? 'active' : ''}`}>
@@ -610,24 +632,24 @@
       };
 
       return (
-        <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl overflow-hidden slide-in-from-bottom-10 animate-in pb-4 border border-gray-100 dark:border-gray-700">
+        <div className="pb-safe flex flex-col h-full w-full">
           <div id="reader-hidden" style={{display:'none'}}></div>
-          <div className={`p-6 text-white bg-gradient-to-br ${formData.colorCode}`}>
-            <div className="flex justify-between items-center mb-4">
+          <div className={`p-6 pt-5 text-white bg-gradient-to-br ${formData.colorCode} flex-shrink-0`}>
+            <div className="flex justify-between items-center mb-6">
               <button onClick={onCancel} className="p-2 bg-white/20 rounded-full backdrop-blur-md"><X size={20} /></button>
               <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : CATEGORIES[category].label}</span>
               <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
             </div>
             <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
-            <input type="text" placeholder={category === 'ticket' ? 'Datum / Info' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-4" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
+            <input type="text" placeholder={category === 'ticket' ? 'Datum / Info' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-2" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-6 flex-1 bg-white dark:bg-gray-800">
             {(category === 'coupon' || (category === 'custom' && formData.customOptions.canRedeem)) && (
               <div className="flex space-x-4">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Ursprungswert (€)</label>
-                  <input type="text" inputMode="decimal" pattern="[0-9]*" className="w-full bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg" value={formData.initialValue} onChange={(e) => setFormData({...formData, initialValue: e.target.value, currentValue: initialData ? formData.currentValue : e.target.value})} />
+                  <input type="text" inputMode="decimal" pattern="[0-9]*" className="w-full bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg" value={formData.initialValue} onChange={(e) => setFormData({...formData, initialValue: e.target.value, currentValue: initialData && initialData.id ? formData.currentValue : e.target.value})} />
                 </div>
                 {initialData && initialData.id && (
                   <div className="flex-1">
@@ -676,7 +698,7 @@
               </label>
             </div>
 
-            <div className="pt-4 border-t border-gray-100 dark:border-gray-700 space-y-3">
+            <div className="pt-4 border-t border-gray-100 dark:border-gray-700 space-y-3 pb-8">
               <button onClick={() => onSaveTemplate(formData)} className="w-full flex justify-center items-center gap-2 bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold active:scale-95 transition"><CopyPlus size={18} /> Vorlage speichern</button>
               {initialData && initialData.id && onDelete && (
                 !showDel ? <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2"><Trash2 size={18}/> Karte löschen</button> :
