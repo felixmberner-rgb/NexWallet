@@ -36,19 +36,20 @@
   </script>
 
   <style>
-    /* Native Body Scrolling - Verhindert iOS Safe-Area Bugs */
-    body { 
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    html, body { 
+      height: 100%; width: 100%; 
+      overflow: hidden; 
+      position: fixed; 
       margin: 0; padding: 0;
       -webkit-tap-highlight-color: transparent; 
-      background-color: #f3f4f6; /* bg-gray-100 */
+      background-color: #f3f4f6;
       color: #111827;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
     @media (prefers-color-scheme: dark) {
-      body { background-color: #111827; color: #f3f4f6; }
+      html, body { background-color: #111827; color: #f3f4f6; }
     }
 
-    /* Fixed Header Styling */
     .header-fixed {
       position: fixed;
       top: 0; left: 0; right: 0;
@@ -56,14 +57,12 @@
       z-index: 40;
     }
 
-    /* Main Content Padding (um nicht unter Header/Nav zu verschwinden) */
     .main-wrapper {
       padding-top: max(130px, env(safe-area-inset-top) + 110px);
       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
       min-height: 100vh;
     }
 
-    /* --- LIQUID BOTTOM NAVIGATION (Wie Messdiener-App) --- */
     .liquid-nav {
       position: fixed;
       bottom: max(24px, env(safe-area-inset-bottom));
@@ -77,7 +76,6 @@
       padding: 8px;
       box-shadow: 0 12px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
       z-index: 1000;
-      /* Schnellere, federnde Animation */
       transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
     }
     @media (prefers-color-scheme: dark) {
@@ -87,7 +85,8 @@
       }
     }
     
-    .liquid-nav.keyboard-open {
+    /* Dynamische Klasse: Versteckt die Navbar bei Tastatur ODER Fullscreen */
+    .liquid-nav.nav-hidden {
       transform: translate(-50%, 150%);
       opacity: 0;
       pointer-events: none;
@@ -98,7 +97,7 @@
       border-radius: 30px;
       font-weight: 600;
       font-size: 14px;
-      color: #6b7280; /* text-gray-500 */
+      color: #6b7280;
       cursor: pointer;
       display: flex;
       align-items: center;
@@ -110,12 +109,11 @@
     @media (prefers-color-scheme: dark) { .nav-item { color: #9ca3af; } }
     
     .nav-item.active {
-      background: #2563eb; /* text-blue-600 */
+      background: #2563eb;
       color: white;
       box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
     }
 
-    /* Scrollbars unsichtbar */
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
@@ -172,7 +170,6 @@
           navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
         }
 
-        // Schnelle, direkte Tastatur-Erkennung
         const handleFocusIn = (e) => {
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) setIsKeyboardOpen(true);
         };
@@ -182,7 +179,7 @@
                     if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
                         setIsKeyboardOpen(false);
                     }
-                }, 20); // Reduziert für flotteres Feeling
+                }, 20);
             }
         };
 
@@ -200,13 +197,9 @@
           setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category);
           setPreviousView('wallet'); setCurrentView('creator');
           window.history.replaceState({}, document.title, window.location.pathname);
-        } else if (cards.length === 0) {
-          setCards([{
-            id: '1', title: 'Kino Gutschein', description: 'Gilt für alle Filme', image: null,
-            initialValue: 30.00, currentValue: 15.00, codeType: 'BARCODE', codeValue: '202666825915', 
-            category: 'coupon', isGifted: false, isRedeemed: false, colorCode: 'from-orange-400 to-red-500'
-          }]);
         }
+
+        // Demo-Daten Logik hier komplett entfernt! App bleibt leer, wenn nichts hinzugefügt wurde.
 
         return () => {
            document.removeEventListener('focusin', handleFocusIn);
@@ -276,12 +269,14 @@
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
       const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
+      // Definiert, wann die Navbar nach unten verschwinden soll
+      const hideNav = isKeyboardOpen || fullscreenCode !== null;
+
       return (
         <div>
-          {/* FESTGEPINNTER HEADER */}
           <header className="header-fixed bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 px-5 pb-2">
             <div className="flex justify-between items-center pb-2 mt-2">
-              <h1 className="text-[32px] leading-tight font-extrabold tracking-tight">
+              <h1 className="text-[28px] leading-tight font-extrabold tracking-tight">
                 {currentView === 'wallet' && 'NexWallet'}
                 {currentView === 'gifted' && 'Archiv'}
                 {currentView === 'category-select' && 'Neu erstellen'}
@@ -332,7 +327,6 @@
             </div>
           )}
 
-          {/* HAUPTINHALT SCROLLBAR */}
           <main className="main-wrapper px-4">
             {currentView === 'wallet' && (
               <div className="space-y-6">
@@ -424,8 +418,8 @@
             )}
           </main>
 
-          {/* LIQUID NAVIGATION (Schwebende Pille) */}
-          <nav className={`liquid-nav ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
+          {/* LIQUID NAVIGATION - Nutzt hideNav um sich bei Fullscreen & Tastatur zu verstecken */}
+          <nav className={`liquid-nav ${hideNav ? 'nav-hidden' : ''}`}>
             <div onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} className={`nav-item ${currentView === 'wallet' ? 'active' : ''}`}>
               <Wallet size={18} /><span>Wallet</span>
             </div>
@@ -437,7 +431,6 @@
             </div>
           </nav>
 
-          {/* OVERLAYS (Scanner & Modal) bleiben wie bisher fixed über allem */}
           {fullscreenCode && (
             <div className="fixed inset-0 z-[200] bg-white flex items-center justify-center animate-in zoom-in-95 duration-200" onClick={() => setFullscreenCode(null)}>
               <button className="absolute top-12 right-6 p-3 bg-gray-100 rounded-full text-black z-50"><X size={28} /></button>
@@ -497,7 +490,6 @@
         <div onClick={!isArchivedView ? onFullscreen : undefined} className={`relative w-full rounded-[2rem] shadow-xl overflow-hidden text-white bg-gradient-to-br ${card.colorCode || 'from-gray-700 to-gray-900'} transition-transform active:scale-[0.98]`}>
           <div className="p-6 pb-4 flex justify-between items-start">
             <div className="flex-1 pr-4">
-              {/* Text-Shadow wurde komplett entfernt (kein shadow-sm mehr in der Klasse) */}
               <h2 className="text-2xl font-bold tracking-tight leading-tight">{card.title}</h2>
               <p className="text-white/80 font-medium mt-1">{card.description}</p>
             </div>
