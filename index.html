@@ -147,12 +147,16 @@
 
     function NexWallet() {
       const [cards, setCards] = useState(() => {
-        const saved = localStorage.getItem('nex_cards');
-        return saved ? JSON.parse(saved) : [];
+        try {
+          const saved = localStorage.getItem('nex_cards');
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) { return []; }
       });
       const [templates, setTemplates] = useState(() => {
-        const saved = localStorage.getItem('nex_templates');
-        return saved ? JSON.parse(saved) : [];
+        try {
+          const saved = localStorage.getItem('nex_templates');
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) { return []; }
       });
 
       const [currentView, setCurrentView] = useState('wallet'); 
@@ -175,9 +179,15 @@
       }, [cards, templates]);
 
       useEffect(() => {
+        // Sicherer Datums-Abgleich (Airbag für ungültige Daten)
         const today = new Date().toISOString().split('T')[0];
         setCards(prevCards => {
-          const validCards = prevCards.filter(c => !c.expiryDate || c.expiryDate >= today);
+          const validCards = prevCards.filter(c => {
+             if (!c.expiryDate) return true;
+             // Falls das Datum kaputt ist (zB "31.12.2024"), behalten wir die Karte sicherheitshalber
+             if (c.expiryDate.length !== 10 || !c.expiryDate.includes('-')) return true;
+             return c.expiryDate >= today;
+          });
           return validCards.length !== prevCards.length ? validCards : prevCards;
         });
 
@@ -213,7 +223,7 @@
             customOptions: { canRedeem: true, canGift: true }
           };
           setEditingCard(shortcutCard); 
-          setSelectedCategory(shortcutCard.category);
+          setSelectedCategory(shortcutCard.category || 'custom');
           setCurrentView('wallet');
           setIsCreatorOpen(true);
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -269,18 +279,26 @@
           const reader = new FileReader();
           reader.onload = (e) => {
             try {
-              const data = JSON.parse(e.target.result);
+              let fileContent = e.target.result;
+              if(fileContent.includes('{\\rtf1')) {
+                 const jsonMatch = fileContent.match(/\[.*\]/s) || fileContent.match(/\{.*\}/s);
+                 if(jsonMatch) fileContent = jsonMatch[0];
+              }
+              const data = JSON.parse(fileContent);
               const list = Array.isArray(data) ? data : [data];
               setCards(prev => {
                 const existingIds = new Set(prev.map(c => c.id));
                 const fresh = list.filter(c => !existingIds.has(c.id));
                 return [...prev, ...fresh];
               });
-            } catch(err) {}
+              showToast("Import erfolgreich");
+            } catch(err) {
+              alert("Fehler beim Lesen der Datei. Ist es ein sauberes .json Format?");
+            }
           };
           reader.readAsText(file);
         });
-        setTimeout(() => showToast("Import abgeschlossen"), 500);
+        event.target.value = '';
       };
 
       const openEditor = (card) => {
@@ -291,7 +309,8 @@
 
       const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
-      const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
+      // Failsafe: Falls eine Kategorie unbekannt ist, wird sie als 'custom' gelistet
+      const presentCategories = [...new Set(activeCards.map(c => CATEGORIES[c.category] ? c.category : 'custom'))];
 
       const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen;
 
@@ -309,7 +328,7 @@
                 <div className="flex space-x-2">
                   <label className="cursor-pointer p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition active:scale-90">
                     <Upload size={18} className="text-gray-700 dark:text-gray-200" />
-                    <input type="file" multiple accept=".nexwallet,.json" className="hidden" onChange={importData} />
+                    <input type="file" multiple accept=".nexwallet,.json,.txt,.rtf,*/*" className="hidden" onChange={importData} />
                   </label>
                   <button onClick={() => {
                     const blob = new Blob([JSON.stringify(cards)], {type: 'application/json'});
@@ -330,16 +349,19 @@
                 >
                   Alle
                 </button>
-                {presentCategories.map(cat => (
-                  <button 
-                    key={cat}
-                    onClick={() => setActiveCategoryTab(cat)}
-                    className={`whitespace-nowrap flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === cat ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-300'}`}
-                  >
-                    {React.createElement(CATEGORIES[cat].icon, { size: 14 })}
-                    {CATEGORIES[cat].label}
-                  </button>
-                ))}
+                {presentCategories.map(cat => {
+                  const catData = CATEGORIES[cat] || CATEGORIES['custom'];
+                  return (
+                    <button 
+                      key={cat}
+                      onClick={() => setActiveCategoryTab(cat)}
+                      className={`whitespace-nowrap flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === cat ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-300'}`}
+                    >
+                      {React.createElement(catData.icon, { size: 14 })}
+                      {catData.label}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </header>
@@ -362,7 +384,7 @@
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
                       onToggleGift={() => toggleGifted(card.id)}
-                      onEdit={() => { setPreviousView('wallet'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
+                      onEdit={() => openEditor(card)}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                     />
@@ -386,7 +408,7 @@
                         onToggleGift={() => toggleGifted(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
-                        onEdit={() => { setPreviousView('gifted'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
+                        onEdit={() => openEditor(card)}
                         formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                         isArchivedView={true}
                       />
@@ -410,15 +432,18 @@
                   <div>
                     <h3 className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4 ml-2">Vorlagen</h3>
                     <div className="space-y-3">
-                      {templates.map(tmpl => (
-                        <div key={tmpl.id} onClick={() => { setEditingCard({...tmpl, id: null, currentValue: tmpl.initialValue}); setSelectedCategory(tmpl.category); setIsCreatorOpen(true); }} className="w-full flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${CATEGORIES[tmpl.category].bg} ${CATEGORIES[tmpl.category].color} dark:bg-opacity-20`}>{React.createElement(CATEGORIES[tmpl.category].icon, { size: 18 })}</div>
-                            <p className="font-bold text-gray-800 dark:text-gray-100">{tmpl.title}</p>
+                      {templates.map(tmpl => {
+                        const tCat = CATEGORIES[tmpl.category] || CATEGORIES['custom'];
+                        return (
+                          <div key={tmpl.id} onClick={() => { setEditingCard({...tmpl, id: null, currentValue: tmpl.initialValue}); setSelectedCategory(tmpl.category || 'custom'); setIsCreatorOpen(true); }} className="w-full flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer active:scale-95 transition">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tCat.bg} ${tCat.color} dark:bg-opacity-20`}>{React.createElement(tCat.icon, { size: 18 })}</div>
+                              <p className="font-bold text-gray-800 dark:text-gray-100">{tmpl.title || 'Vorlage'}</p>
+                            </div>
+                            <button onClick={(e) => deleteTemplate(tmpl.id, e)} className="p-2 text-red-400 hover:text-red-600 bg-red-50 dark:bg-red-900/20 rounded-full"><Trash2 size={16} /></button>
                           </div>
-                          <button onClick={(e) => deleteTemplate(tmpl.id, e)} className="p-2 text-red-400 hover:text-red-600 bg-red-50 dark:bg-red-900/20 rounded-full"><Trash2 size={16} /></button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -521,6 +546,16 @@
       const canGift = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canGift);
       const percentLeft = card.initialValue > 0 ? (card.currentValue / card.initialValue) * 100 : 0;
 
+      // Sicherer Datums-Formatierer (Absturzsicher)
+      const renderDate = (dateStr) => {
+        if (!dateStr) return '';
+        try {
+           const d = new Date(dateStr);
+           if (isNaN(d.getTime())) return dateStr;
+           return d.toLocaleDateString('de-DE');
+        } catch(e) { return dateStr; }
+      };
+
       return (
         <div onClick={!isArchivedView ? onFullscreen : undefined} className={`relative w-full rounded-[2rem] shadow-xl overflow-hidden text-white bg-gradient-to-br ${card.colorCode || 'from-gray-700 to-gray-900'} transition-transform active:scale-[0.98]`}>
           <div className="p-6 pb-4 flex justify-between items-start">
@@ -530,7 +565,7 @@
               {card.expiryDate && (
                 <p className="text-white/90 font-bold text-sm mt-2 flex items-center gap-1">
                   {card.category === 'ticket' ? '📅 ' : '⏳ '} 
-                  {new Date(card.expiryDate).toLocaleDateString('de-DE')}
+                  {renderDate(card.expiryDate)}
                 </p>
               )}
             </div>
@@ -598,6 +633,7 @@
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
       const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
+      const catData = CATEGORIES[category] || CATEGORIES['custom'];
 
       const [formData, setFormData] = useState({
         title: initialData?.title || '', 
@@ -608,10 +644,11 @@
         codeType: initialData?.codeType || 'BARCODE', 
         codeValue: initialData?.codeValue || '', 
         colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
-        category: category, 
+        category: category || 'custom', 
         expiryDate: initialData ? (initialData.expiryDate || '') : defaultExpiry,
         customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
       });
+      
       const [isScanning, setIsScanning] = useState(false);
       const [showDel, setShowDel] = useState(false);
 
@@ -629,7 +666,7 @@
           id: initialData?.id, 
           initialValue: initVal, 
           currentValue: currVal, 
-          category: category 
+          category: formData.category 
         });
       };
 
@@ -659,7 +696,7 @@
           <div className={`p-6 pt-8 text-white bg-gradient-to-br ${formData.colorCode} flex-shrink-0`}>
             <div className="flex justify-between items-center mb-6">
               <button onClick={onCancel} className="p-2 bg-white/20 rounded-full backdrop-blur-md"><X size={20} /></button>
-              <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : CATEGORIES[category].label}</span>
+              <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : catData.label}</span>
               <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
             </div>
             <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
@@ -682,13 +719,11 @@
               </div>
             )}
 
-            {/* HIER IST DIE LOGIK FÜR DAS DATUM (Nicht für Mitgliedskarten) */}
             {category !== 'loyalty' && (
               <div className="w-full">
                 <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">
                   {category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'} (Optional)
                 </label>
-                {/* WICHTIG: block w-full box-border appearance-none korrigiert den iOS Bug */}
                 <input type="date" className="block w-full box-border appearance-none bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold text-lg font-sans" value={formData.expiryDate} onChange={(e) => setFormData({...formData, expiryDate: e.target.value})} />
               </div>
             )}
@@ -731,11 +766,21 @@
               </label>
             </div>
 
+            {/* Hier ist der WIEDERHERGESTELLTE LÖSCHEN-BUTTON! */}
             <div className="pt-4 border-t border-gray-100 dark:border-gray-700 space-y-3 pb-8">
               <button onClick={() => onSaveTemplate(formData)} className="w-full flex justify-center items-center gap-2 bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold active:scale-95 transition"><CopyPlus size={18} /> Vorlage speichern</button>
+              
               {initialData && initialData.id && onDelete && (
-                !showDel ? <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2"><Trash2 size={18}/> Karte löschen</button> :
-                <div className="flex gap-3 animate-in fade-in slide-in-from-right-4"><button onClick={() => setShowDel(false)} className="flex-1 p-4 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl font-bold">Abbrechen</button><button onClick={onDelete} className="flex-1 p-4 bg-red-500 text-white rounded-xl font-bold shadow-lg">Löschen</button></div>
+                !showDel ? (
+                  <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2">
+                    <Trash2 size={18}/> Karte löschen
+                  </button>
+                ) : (
+                  <div className="flex gap-3 animate-in fade-in slide-in-from-right-4">
+                    <button onClick={() => setShowDel(false)} className="flex-1 p-4 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl font-bold">Abbrechen</button>
+                    <button onClick={onDelete} className="flex-1 p-4 bg-red-500 text-white rounded-xl font-bold shadow-lg">Wirklich löschen</button>
+                  </div>
+                )
               )}
             </div>
           </div>
