@@ -147,16 +147,12 @@
 
     function NexWallet() {
       const [cards, setCards] = useState(() => {
-        try {
-          const saved = localStorage.getItem('nex_cards');
-          return saved ? JSON.parse(saved) : [];
-        } catch(e) { return []; }
+        const saved = localStorage.getItem('nex_cards');
+        return saved ? JSON.parse(saved) : [];
       });
       const [templates, setTemplates] = useState(() => {
-        try {
-          const saved = localStorage.getItem('nex_templates');
-          return saved ? JSON.parse(saved) : [];
-        } catch(e) { return []; }
+        const saved = localStorage.getItem('nex_templates');
+        return saved ? JSON.parse(saved) : [];
       });
 
       const [currentView, setCurrentView] = useState('wallet'); 
@@ -179,15 +175,9 @@
       }, [cards, templates]);
 
       useEffect(() => {
-        // Sicherer Datums-Abgleich (Airbag für ungültige Daten)
         const today = new Date().toISOString().split('T')[0];
         setCards(prevCards => {
-          const validCards = prevCards.filter(c => {
-             if (!c.expiryDate) return true;
-             // Falls das Datum kaputt ist (zB "31.12.2024"), behalten wir die Karte sicherheitshalber
-             if (c.expiryDate.length !== 10 || !c.expiryDate.includes('-')) return true;
-             return c.expiryDate >= today;
-          });
+          const validCards = prevCards.filter(c => !c.expiryDate || c.expiryDate >= today);
           return validCards.length !== prevCards.length ? validCards : prevCards;
         });
 
@@ -223,7 +213,7 @@
             customOptions: { canRedeem: true, canGift: true }
           };
           setEditingCard(shortcutCard); 
-          setSelectedCategory(shortcutCard.category || 'custom');
+          setSelectedCategory(shortcutCard.category);
           setCurrentView('wallet');
           setIsCreatorOpen(true);
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -272,6 +262,7 @@
         }
       };
 
+      // --- DER BULLETPROOF JSON IMPORT ---
       const importData = (event) => {
         const files = event.target.files;
         if (!files.length) return;
@@ -279,26 +270,59 @@
           const reader = new FileReader();
           reader.onload = (e) => {
             try {
-              let fileContent = e.target.result;
-              if(fileContent.includes('{\\rtf1')) {
-                 const jsonMatch = fileContent.match(/\[.*\]/s) || fileContent.match(/\{.*\}/s);
-                 if(jsonMatch) fileContent = jsonMatch[0];
+              let text = e.target.result;
+
+              // 1. "Smart Quotes" reparieren (Apple Kurzbefehle macht das gerne)
+              text = text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+
+              // 2. Den reinen JSON Codeblock isolieren
+              const firstBracket = text.indexOf('[');
+              const firstBrace = text.indexOf('{');
+              const lastBracket = text.lastIndexOf(']');
+              const lastBrace = text.lastIndexOf('}');
+              
+              let startIdx = -1;
+              let endIdx = -1;
+
+              if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
+                  startIdx = firstBracket;
+                  endIdx = lastBracket;
+              } else if (firstBrace !== -1) {
+                  startIdx = firstBrace;
+                  endIdx = lastBrace;
               }
-              const data = JSON.parse(fileContent);
+
+              if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+                  throw new Error("Kein gültiger JSON Block gefunden.");
+              }
+
+              const cleanJson = text.substring(startIdx, endIdx + 1);
+              
+              // 3. Parsen
+              const data = JSON.parse(cleanJson);
               const list = Array.isArray(data) ? data : [data];
+
+              // 4. IDs bereinigen (Falls ChatGPT z.B. 583421 als Zahl generiert hat statt als String)
+              const normalizedList = list.map(c => ({
+                 ...c,
+                 id: String(c.id || Date.now() + Math.random())
+              }));
+
               setCards(prev => {
-                const existingIds = new Set(prev.map(c => c.id));
-                const fresh = list.filter(c => !existingIds.has(c.id));
+                const existingIds = new Set(prev.map(c => String(c.id)));
+                const fresh = normalizedList.filter(c => !existingIds.has(c.id));
                 return [...prev, ...fresh];
               });
+
               showToast("Import erfolgreich");
             } catch(err) {
-              alert("Fehler beim Lesen der Datei. Ist es ein sauberes .json Format?");
+              console.error("Import Fehler:", err);
+              alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Kurzbefehle-App korrekten Text speichert.");
             }
           };
           reader.readAsText(file);
         });
-        event.target.value = '';
+        event.target.value = ''; // Input resetten
       };
 
       const openEditor = (card) => {
@@ -309,8 +333,7 @@
 
       const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
-      // Failsafe: Falls eine Kategorie unbekannt ist, wird sie als 'custom' gelistet
-      const presentCategories = [...new Set(activeCards.map(c => CATEGORIES[c.category] ? c.category : 'custom'))];
+      const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
       const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen;
 
@@ -384,7 +407,7 @@
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
                       onToggleGift={() => toggleGifted(card.id)}
-                      onEdit={() => openEditor(card)}
+                      onEdit={() => { setPreviousView('wallet'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                     />
@@ -408,7 +431,7 @@
                         onToggleGift={() => toggleGifted(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
-                        onEdit={() => openEditor(card)}
+                        onEdit={() => { setPreviousView('gifted'); setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
                         formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                         isArchivedView={true}
                       />
@@ -546,7 +569,6 @@
       const canGift = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canGift);
       const percentLeft = card.initialValue > 0 ? (card.currentValue / card.initialValue) * 100 : 0;
 
-      // Sicherer Datums-Formatierer (Absturzsicher)
       const renderDate = (dateStr) => {
         if (!dateStr) return '';
         try {
@@ -633,7 +655,6 @@
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
       const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
-      const catData = CATEGORIES[category] || CATEGORIES['custom'];
 
       const [formData, setFormData] = useState({
         title: initialData?.title || '', 
@@ -644,7 +665,7 @@
         codeType: initialData?.codeType || 'BARCODE', 
         codeValue: initialData?.codeValue || '', 
         colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
-        category: category || 'custom', 
+        category: category, 
         expiryDate: initialData ? (initialData.expiryDate || '') : defaultExpiry,
         customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
       });
@@ -666,7 +687,7 @@
           id: initialData?.id, 
           initialValue: initVal, 
           currentValue: currVal, 
-          category: formData.category 
+          category: category 
         });
       };
 
@@ -696,7 +717,7 @@
           <div className={`p-6 pt-8 text-white bg-gradient-to-br ${formData.colorCode} flex-shrink-0`}>
             <div className="flex justify-between items-center mb-6">
               <button onClick={onCancel} className="p-2 bg-white/20 rounded-full backdrop-blur-md"><X size={20} /></button>
-              <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : catData.label}</span>
+              <span className="font-bold">{initialData && initialData.id ? 'Bearbeiten' : CATEGORIES[category].label}</span>
               <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
             </div>
             <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
@@ -766,21 +787,11 @@
               </label>
             </div>
 
-            {/* Hier ist der WIEDERHERGESTELLTE LÖSCHEN-BUTTON! */}
             <div className="pt-4 border-t border-gray-100 dark:border-gray-700 space-y-3 pb-8">
               <button onClick={() => onSaveTemplate(formData)} className="w-full flex justify-center items-center gap-2 bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-xl font-bold active:scale-95 transition"><CopyPlus size={18} /> Vorlage speichern</button>
-              
               {initialData && initialData.id && onDelete && (
-                !showDel ? (
-                  <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2">
-                    <Trash2 size={18}/> Karte löschen
-                  </button>
-                ) : (
-                  <div className="flex gap-3 animate-in fade-in slide-in-from-right-4">
-                    <button onClick={() => setShowDel(false)} className="flex-1 p-4 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl font-bold">Abbrechen</button>
-                    <button onClick={onDelete} className="flex-1 p-4 bg-red-500 text-white rounded-xl font-bold shadow-lg">Wirklich löschen</button>
-                  </div>
-                )
+                !showDel ? <button onClick={() => setShowDel(true)} className="w-full p-4 text-red-500 font-bold active:scale-95 transition flex justify-center items-center gap-2"><Trash2 size={18}/> Karte löschen</button> :
+                <div className="flex gap-3 animate-in fade-in slide-in-from-right-4"><button onClick={() => setShowDel(false)} className="flex-1 p-4 bg-gray-100 dark:bg-gray-700 dark:text-white rounded-xl font-bold">Abbrechen</button><button onClick={onDelete} className="flex-1 p-4 bg-red-500 text-white rounded-xl font-bold shadow-lg">Löschen</button></div>
               )}
             </div>
           </div>
