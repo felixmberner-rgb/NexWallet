@@ -36,33 +36,46 @@
   </script>
 
   <style>
-    html, body { 
-      height: 100%; width: 100%; 
-      overflow: hidden; 
-      position: fixed; 
+    /* Native Body Scrolling für perfektes iOS Feeling */
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0; padding: 0;
       -webkit-tap-highlight-color: transparent; 
       background-color: #f3f4f6;
       color: #111827;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow-x: hidden;
     }
     @media (prefers-color-scheme: dark) {
-      html, body { background-color: #111827; color: #f3f4f6; }
+      body { background-color: #111827; color: #f3f4f6; }
     }
 
+    /* Fester Header */
     .header-fixed {
       position: fixed;
       top: 0; left: 0; right: 0;
       padding-top: max(16px, env(safe-area-inset-top));
       z-index: 40;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid #e5e7eb;
+    }
+    @media (prefers-color-scheme: dark) {
+      .header-fixed {
+        background: rgba(17, 24, 39, 0.95);
+        border-bottom: 1px solid #374151;
+      }
     }
 
-    .main-wrapper {
-      padding-top: max(130px, env(safe-area-inset-top) + 110px);
+    /* Platzhalter für den scrollbaren Inhalt */
+    .main-content {
+      padding-top: max(110px, env(safe-area-inset-top) + 90px);
       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
       min-height: 100vh;
+      box-sizing: border-box;
     }
 
+    /* Liquid Bottom Navigation */
     .liquid-nav {
       position: fixed;
       bottom: max(24px, env(safe-area-inset-bottom));
@@ -76,7 +89,7 @@
       padding: 8px;
       box-shadow: 0 12px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
       z-index: 1000;
-      transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
+      transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease;
     }
     @media (prefers-color-scheme: dark) {
       .liquid-nav {
@@ -85,7 +98,6 @@
       }
     }
     
-    /* Dynamische Klasse: Versteckt die Navbar bei Tastatur ODER Fullscreen */
     .liquid-nav.nav-hidden {
       transform: translate(-50%, 150%);
       opacity: 0;
@@ -186,6 +198,7 @@
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
 
+        // HIER WAR DER FEHLER: URLSearchParams ist korrekt!
         const params = new URLSearchParams(window.location.search);
         if (params.get('action') === 'create') {
           const shortcutCard = {
@@ -198,8 +211,6 @@
           setPreviousView('wallet'); setCurrentView('creator');
           window.history.replaceState({}, document.title, window.location.pathname);
         }
-
-        // Demo-Daten Logik hier komplett entfernt! App bleibt leer, wenn nichts hinzugefügt wurde.
 
         return () => {
            document.removeEventListener('focusin', handleFocusIn);
@@ -269,13 +280,13 @@
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
       const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
-      // Definiert, wann die Navbar nach unten verschwinden soll
+      // Blendet Leiste bei Tastatur oder Scan aus
       const hideNav = isKeyboardOpen || fullscreenCode !== null;
 
       return (
-        <div>
-          <header className="header-fixed bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 px-5 pb-2">
-            <div className="flex justify-between items-center pb-2 mt-2">
+        <div className="w-full">
+          <header className="header-fixed px-5 pb-2">
+            <div className="flex justify-between items-center pb-2">
               <h1 className="text-[28px] leading-tight font-extrabold tracking-tight">
                 {currentView === 'wallet' && 'NexWallet'}
                 {currentView === 'gifted' && 'Archiv'}
@@ -327,7 +338,7 @@
             </div>
           )}
 
-          <main className="main-wrapper px-4">
+          <main className="main-content px-4">
             {currentView === 'wallet' && (
               <div className="space-y-6">
                 {activeCards.length === 0 ? (
@@ -418,7 +429,6 @@
             )}
           </main>
 
-          {/* LIQUID NAVIGATION - Nutzt hideNav um sich bei Fullscreen & Tastatur zu verstecken */}
           <nav className={`liquid-nav ${hideNav ? 'nav-hidden' : ''}`}>
             <div onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} className={`nav-item ${currentView === 'wallet' ? 'active' : ''}`}>
               <Wallet size={18} /><span>Wallet</span>
@@ -576,7 +586,14 @@
         const initVal = isNaN(parsedInit) ? 0 : parsedInit;
         const parsedCurr = parseFloat(String(formData.currentValue).replace(',', '.'));
         const currVal = isNaN(parsedCurr) ? initVal : parsedCurr;
-        onSave({ ...formData, initialValue: initVal, currentValue: currVal, category: category });
+        
+        onSave({ 
+          ...formData, 
+          id: initialData?.id, 
+          initialValue: initVal, 
+          currentValue: currVal, 
+          category: category 
+        });
       };
 
       const scanBarcode = async (e) => {
