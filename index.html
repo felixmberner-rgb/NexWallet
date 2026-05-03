@@ -270,32 +270,29 @@
       };
 
       const parseImportedFile = (fileText) => {
-        try { return JSON.parse(fileText); } catch(e) {}
         let text = String(fileText);
-        if (text.includes('{\\rtf1')) {
-            let start = text.indexOf('['); if(start === -1) start = text.indexOf('{');
-            let end = text.lastIndexOf(']'); if(end === -1) end = text.lastIndexOf('}');
-            if (start !== -1 && end !== -1 && start < end) {
-                text = text.substring(start, end + 1);
-                text = text.replace(/\\par[ \d]*\n?/g, ''); 
-                text = text.replace(/\\[a-z0-9]+\s?/gi, ''); 
-                text = text.replace(/\\{/g, '{').replace(/\\}/g, '}'); 
-            }
-        }
-        text = text.replace(/```json/gi, '').replace(/```/g, '');
-        text = text.replace(/\\"/g, '"').replace(/\\n/g, '');
+        text = text.replace(/```json/gi, '').replace(/```/gi, '');
         text = text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 
-        let start = text.indexOf('[');
-        let startObj = text.indexOf('{');
-        if (start === -1 || (startObj !== -1 && startObj < start)) start = startObj;
-        let end = text.lastIndexOf(']');
-        let endObj = text.lastIndexOf('}');
-        if (end === -1 || (endObj !== -1 && endObj > end)) end = endObj;
-        if (start !== -1 && end !== -1 && start < end) {
-            text = text.substring(start, end + 1);
+        try { return JSON.parse(text); } catch(e) {}
+
+        let startIdx = text.indexOf('[');
+        let objIdx = text.indexOf('{');
+        if (startIdx === -1 || (objIdx !== -1 && objIdx < startIdx)) startIdx = objIdx;
+        
+        let endIdx = text.lastIndexOf(']');
+        let objEndIdx = text.lastIndexOf('}');
+        if (endIdx === -1 || (objEndIdx !== -1 && objEndIdx > endIdx)) endIdx = objEndIdx;
+
+        if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
+            let possibleJson = text.substring(startIdx, endIdx + 1);
+            possibleJson = possibleJson.replace(/\\par[ \d]*\n?/g, ''); 
+            possibleJson = possibleJson.replace(/\\[a-z0-9]+\s?/gi, ''); 
+            possibleJson = possibleJson.replace(/\\/g, ''); 
+            
+            try { return JSON.parse(possibleJson); } catch(e) {}
         }
-        return JSON.parse(text); 
+        throw new Error("Ungültiges Format");
       };
 
       const importData = (event) => {
@@ -308,21 +305,33 @@
             try {
               const data = parseImportedFile(e.target.result);
               const list = Array.isArray(data) ? data : [data];
-              const normalizedList = list.map(c => ({ ...c, id: String(c.id || Date.now() + Math.random()) }));
+              
+              const normalizedList = list.map(c => ({
+                 ...c,
+                 id: String(c.id || Date.now() + Math.random())
+              }));
 
               setCards(prev => {
                 const existingIds = new Set(prev.map(c => String(c.id)));
                 const fresh = normalizedList.filter(c => !existingIds.has(c.id));
                 return [...prev, ...fresh];
               });
+
               showToast("Import erfolgreich");
             } catch(err) {
-              alert("Fehler beim Lesen. Stelle sicher, dass die Datei Text oder JSON ist.");
+              console.error("Import Fehler:", err);
+              alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Kurzbefehle-App korrekten Text speichert.");
             }
           };
           reader.readAsText(file);
         });
         event.target.value = ''; 
+      };
+
+      const openEditor = (card) => {
+        setEditingCard(card);
+        setSelectedCategory(card.category || 'custom');
+        setIsCreatorOpen(true);
       };
 
       const activeCards = cards.filter(c => !c.isGifted && !c.isRedeemed);
@@ -401,7 +410,7 @@
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
                       onToggleGift={() => toggleGifted(card.id)}
-                      onEdit={() => { setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
+                      onEdit={() => openEditor(card)}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                     />
@@ -425,7 +434,7 @@
                         onToggleGift={() => toggleGifted(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
-                        onEdit={() => { setEditingCard(card); setSelectedCategory(card.category); setIsCreatorOpen(true); }}
+                        onEdit={() => openEditor(card)}
                         formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
                         isArchivedView={true}
                       />
@@ -468,7 +477,6 @@
             )}
           </main>
 
-          {/* Modal Pop-Up (Bottom Sheet) */}
           {isCreatorOpen && (
             <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in" onClick={() => setIsCreatorOpen(false)}>
               <div 
@@ -516,7 +524,6 @@
                 <LocalCodeGenerator type={fullscreenCode.codeType} value={fullscreenCode.codeValue} className={fullscreenCode.codeType === 'QR' ? 'w-[40vh] h-[40vh]' : 'w-[75vh] h-[25vh]'} />
                 <p className="text-2xl font-mono mt-8 text-black tracking-widest">{fullscreenCode.codeValue}</p>
                 
-                {/* Anzeige der PIN im Vollbild */}
                 {fullscreenCode.pin && (
                   <div className="mt-8 bg-gray-100 px-6 py-3 rounded-2xl flex items-center gap-4 shadow-sm border border-gray-200">
                     <span className="text-gray-400 font-bold uppercase text-xs tracking-widest">PIN</span>
@@ -588,7 +595,6 @@
               <h2 className="text-2xl font-bold tracking-tight leading-tight">{card.title}</h2>
               <p className="text-white/80 font-medium mt-1">{card.description}</p>
               
-              {/* Zeigt Datum und/oder PIN als kleine Info-Badges auf der Kachel */}
               <div className="flex flex-wrap gap-3 mt-3">
                   {card.expiryDate && (
                     <p className="bg-black/20 px-2 py-1 rounded-md text-white/90 font-bold text-xs flex items-center gap-1 backdrop-blur-sm">
@@ -685,7 +691,6 @@
       const [isScanning, setIsScanning] = useState(false);
       const [showDel, setShowDel] = useState(false);
 
-      // UI States für optionale Felder
       const [showExpiryField, setShowExpiryField] = useState(!!initialData?.expiryDate);
       const [showPinField, setShowPinField] = useState(!!initialData?.pin);
 
@@ -737,11 +742,24 @@
               <button onClick={saveAction} className="p-2 bg-white text-black rounded-full shadow-md"><Check size={20} /></button>
             </div>
             <input type="text" placeholder="Titel..." className="w-full bg-transparent text-3xl font-bold outline-none placeholder-white/40 mb-2" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} />
-            <input type="text" placeholder={category === 'ticket' ? 'Infos / Platz' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-2" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
+            <input type="text" placeholder={formData.category === 'ticket' ? 'Infos / Platz' : 'Beschreibung'} className="w-full bg-transparent text-white/80 outline-none placeholder-white/40 mb-2" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
           </div>
 
           <div className="p-6 space-y-6 flex-1 bg-white dark:bg-gray-800">
-            {(category === 'coupon' || (category === 'custom' && formData.customOptions.canRedeem)) && (
+            
+            {/* NEU: Kategorie im Nachhinein wechseln */}
+            <div className="bg-gray-100 dark:bg-gray-700 p-4 rounded-2xl border border-gray-200 dark:border-gray-600">
+              <div className="flex justify-between items-center">
+                <label className="text-xs font-bold text-gray-400 dark:text-gray-400 uppercase">Kategorie / Typ</label>
+                <select className="bg-transparent font-bold text-sm dark:text-white outline-none" value={formData.category} onChange={(e) => setFormData({...formData, category: e.target.value})}>
+                  {Object.values(CATEGORIES).map(cat => (
+                     <option key={cat.id} value={cat.id}>{cat.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {(formData.category === 'coupon' || (formData.category === 'custom' && formData.customOptions.canRedeem)) && (
               <div className="flex space-x-4">
                 <div className="flex-1">
                   <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Ursprungswert (€)</label>
@@ -756,12 +774,11 @@
               </div>
             )}
 
-            {/* ANGEPASSTE OPTIONALE FELDER */}
-            {category !== 'loyalty' && showExpiryField && (
+            {formData.category !== 'loyalty' && showExpiryField && (
               <div className="w-full animate-in fade-in slide-in-from-top-2">
                 <div className="flex justify-between items-center mb-2">
                   <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">
-                    {category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'}
+                    {formData.category === 'ticket' ? 'Datum der Veranstaltung' : 'Gültig bis'}
                   </label>
                   <button onClick={() => { setShowExpiryField(false); setFormData({...formData, expiryDate: ''}); }} className="text-gray-400 hover:text-red-500 p-1"><X size={16}/></button>
                 </div>
@@ -779,18 +796,17 @@
               </div>
             )}
 
-            {/* BUTTONS FÜR OPTIONALE FELDER */}
             <div className="pt-2">
                 {(!showExpiryField || !showPinField) && <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-3">Zusätzliche Optionen</label>}
                 <div className="space-y-3">
-                    {!showExpiryField && category !== 'loyalty' && (
+                    {!showExpiryField && formData.category !== 'loyalty' && (
                         <button onClick={() => {
                             setShowExpiryField(true);
-                            if (category === 'coupon' && !formData.expiryDate) {
+                            if (formData.category === 'coupon' && !formData.expiryDate) {
                                 setFormData({...formData, expiryDate: `${new Date().getFullYear() + 3}-12-31`});
                             }
                         }} className="w-full flex items-center justify-center gap-2 p-4 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-300 dark:border-gray-600 text-blue-500 font-bold text-sm active:scale-95 transition">
-                           <PlusCircle size={18} /> {category === 'ticket' ? 'Veranstaltungsdatum hinzufügen' : 'Ablaufdatum hinzufügen'}
+                           <PlusCircle size={18} /> {formData.category === 'ticket' ? 'Veranstaltungsdatum hinzufügen' : 'Ablaufdatum hinzufügen'}
                         </button>
                     )}
                     {!showPinField && (
@@ -801,7 +817,7 @@
                 </div>
             </div>
 
-            {category === 'custom' && (
+            {formData.category === 'custom' && (
               <div className="space-y-3 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-2xl border border-gray-100 dark:border-gray-700">
                 <button onClick={() => setFormData({...formData, customOptions: {...formData.customOptions, canRedeem: !formData.customOptions.canRedeem}})} className="flex items-center gap-3 w-full">
                   {formData.customOptions.canRedeem ? <CheckSquare className="text-blue-500" /> : <Square className="text-gray-400 dark:text-gray-500" />} <span className="dark:text-white">Einlösen möglich</span>
