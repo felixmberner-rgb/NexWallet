@@ -2,29 +2,27 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <!-- WICHTIG FÜR iOS PWA: Notch Support, Skalierungs-Sperre & echtes Vollbild -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <!-- Zieht das Design unter die Batterie/Uhrzeit Anzeige -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="NexWallet">
   
-  <!-- App Icon Integration -->
+  <!-- App Icon -->
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" href="apple-touch-icon.png">
   
   <title>NexWallet Pro</title>
 
-  <!-- Tailwind CSS & Konfiguration für Dark Mode -->
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
-      darkMode: 'media', // Passt sich automatisch den iOS Einstellungen an (Hell/Dunkel)
+      darkMode: 'media', 
       theme: { extend: {} }
     }
   </script>
 
-  <!-- Bibliotheken (Scanner & Codes) -->
+  <!-- Scanner Bibliotheken -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
@@ -42,22 +40,45 @@
   </script>
 
   <style>
-    /* Absolute Layout-Kontrolle, um den Bounce-Effekt der ganzen Seite zu stoppen */
+    /* Absoluter Fix gegen das Safari Bouncen und weiße Ränder! */
     html, body { 
-      height: 100%; width: 100%; overflow: hidden; 
+      height: 100%; width: 100%; 
+      overflow: hidden; 
+      position: fixed; /* Sperrt die Seite komplett ein */
+      margin: 0; padding: 0;
       -webkit-tap-highlight-color: transparent; 
-      background-color: #f3f4f6; /* Standard Tailwind gray-100 */
+      background-color: #f3f4f6; /* bg-gray-100 */
     }
     @media (prefers-color-scheme: dark) {
-      html, body { background-color: #111827; /* Standard Tailwind gray-900 */ }
+      html, body { background-color: #111827; /* bg-gray-900 */ }
     }
 
-    /* Safe Area Padding für neuere iPhones mit Notch/Dynamic Island */
+    /* Safe Area Padding für den Header */
     .pt-safe { padding-top: max(1rem, env(safe-area-inset-top)); }
-    .pb-safe { padding-bottom: max(6rem, env(safe-area-inset-bottom) + 5rem); } /* Platz für schwebende Leiste */
-    .bottom-safe { bottom: max(1.5rem, env(safe-area-inset-bottom)); }
+    
+    /* Genug Platz im Main-Content, damit die Karten nicht hinter der Menüleiste verschwinden */
+    .main-content {
+       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
+    }
 
-    /* Unsichtbare Scrollbars, aber touch-scrolling bleibt aktiv */
+    /* Liquid Nav (Die schwebende Menüleiste) */
+    .liquid-nav {
+      position: fixed;
+      bottom: max(24px, env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.4s ease;
+    }
+    
+    /* Klasse, die hinzugefügt wird, wenn die Tastatur sich öffnet */
+    .liquid-nav.keyboard-open {
+      transform: translate(-50%, 150%);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Scrollbars unsichtbar */
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
@@ -100,6 +121,9 @@
       const [redeemAmount, setRedeemAmount] = useState('');
       const [fullscreenCode, setFullscreenCode] = useState(null);
       const [toast, setToast] = useState(null);
+      
+      // NEU: Keyboard Status für die Menüleiste
+      const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
       useEffect(() => {
         localStorage.setItem('nex_cards', JSON.stringify(cards));
@@ -107,6 +131,7 @@
       }, [cards, templates]);
 
       useEffect(() => {
+        // Service Worker Registrierung
         if ('serviceWorker' in navigator) {
           const swCode = `
             self.addEventListener('fetch', (event) => {
@@ -117,31 +142,40 @@
           navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
         }
 
+        // Tastatur Event-Listener (Analog zu Messdiener-App)
+        const handleFocusIn = (e) => {
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) setIsKeyboardOpen(true);
+        };
+        const handleFocusOut = (e) => {
+            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+                setTimeout(() => {
+                    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
+                        setIsKeyboardOpen(false);
+                    }
+                }, 50);
+            }
+        };
+
+        document.addEventListener('focusin', handleFocusIn);
+        document.addEventListener('focusout', handleFocusOut);
+
         const params = new URLSearchParams(window.location.search);
         if (params.get('action') === 'create') {
           const shortcutCard = {
-            title: params.get('title') || '',
-            description: params.get('desc') || '',
-            initialValue: params.get('val') || '',
-            codeValue: params.get('code') || '',
-            codeType: params.get('type') || 'BARCODE',
-            category: params.get('cat') || 'coupon',
+            title: params.get('title') || '', description: params.get('desc') || '',
+            initialValue: params.get('val') || '', codeValue: params.get('code') || '',
+            codeType: params.get('type') || 'BARCODE', category: params.get('cat') || 'coupon',
             customOptions: { canRedeem: true, canGift: true }
           };
-          setEditingCard(shortcutCard);
-          setSelectedCategory(shortcutCard.category);
-          setPreviousView('wallet');
-          setCurrentView('creator');
+          setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category);
+          setPreviousView('wallet'); setCurrentView('creator');
           window.history.replaceState({}, document.title, window.location.pathname);
-        } else if (cards.length === 0) {
-          setCards([
-            {
-              id: '1', title: 'Kino Gutschein', description: 'Gilt für alle Filme', image: null,
-              initialValue: 30.00, currentValue: 15.00, codeType: 'BARCODE', codeValue: '202666825915', 
-              category: 'coupon', isGifted: false, isRedeemed: false, colorCode: 'from-orange-400 to-red-500'
-            }
-          ]);
         }
+
+        return () => {
+           document.removeEventListener('focusin', handleFocusIn);
+           document.removeEventListener('focusout', handleFocusOut);
+        };
       }, []);
 
       const showToast = (msg) => {
@@ -208,16 +242,14 @@
       const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
       return (
-        // FIXED INSET: Verhindert Scrollen der gesamten Seite
-        <div className="fixed inset-0 w-full bg-gray-100 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 flex flex-col select-none transition-colors duration-300">
+        <div className="fixed inset-0 w-full h-full bg-gray-100 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 flex flex-col select-none transition-colors duration-300">
           
-          {/* HEADER: Festgesetzt oben, integriert mit Safe Area */}
           <header className="flex-none pt-safe bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 px-5 pb-2 z-40">
             <div className="flex justify-between items-center pb-2 mt-4">
-              <h1 className="text-2xl font-bold tracking-tight">
+              <h1 className="text-[28px] leading-none font-bold tracking-tight">
                 {currentView === 'wallet' && 'NexWallet'}
                 {currentView === 'gifted' && 'Archiv'}
-                {currentView === 'category-select' && 'Art wählen'}
+                {currentView === 'category-select' && 'Neu erstellen'}
                 {currentView === 'creator' && (editingCard && editingCard.id ? 'Bearbeiten' : CATEGORIES[selectedCategory].label)}
               </h1>
               {(currentView === 'wallet' || currentView === 'gifted') && (
@@ -237,7 +269,6 @@
               )}
             </div>
 
-            {/* Filter-Tabs bleiben beim Scrollen stehen */}
             {currentView === 'wallet' && (
               <div className="pt-2 pb-1 overflow-x-auto hide-scrollbar flex space-x-2">
                 <button 
@@ -266,8 +297,7 @@
             </div>
           )}
 
-          {/* MAIN CONTENT: Eigener, scrollbarer Bereich */}
-          <main className="flex-1 overflow-y-auto px-4 pt-6 pb-safe relative">
+          <main className="flex-1 overflow-y-auto px-4 pt-6 main-content relative">
             {currentView === 'wallet' && (
               <div className="space-y-6">
                 {activeCards.length === 0 ? (
@@ -358,14 +388,13 @@
             )}
           </main>
 
-          {/* LIQUID BOTTOM NAVIGATION (Wie im Referenz-Code) */}
-          <nav className="fixed bottom-safe left-1/2 transform -translate-x-1/2 bg-white/75 dark:bg-gray-800/75 backdrop-blur-[30px] saturate-200 rounded-[40px] flex p-2 shadow-[0_12px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.05)] z-50">
+          {/* LIQUID BOTTOM NAVIGATION */}
+          <nav className={`liquid-nav bg-white/75 dark:bg-gray-800/75 backdrop-blur-[30px] saturate-200 rounded-[40px] flex p-2 shadow-[0_12px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.05)] ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
             <LiquidNavItem icon={Wallet} label="Wallet" active={currentView === 'wallet'} onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} />
             <LiquidNavItem icon={PlusCircle} label="Neu" active={currentView === 'creator' || currentView === 'category-select'} onClick={() => { setPreviousView(currentView); setEditingCard(null); setCurrentView('category-select'); }} />
             <LiquidNavItem icon={Archive} label="Archiv" active={currentView === 'gifted'} onClick={() => setCurrentView('gifted')} />
           </nav>
 
-          {/* VOLLBILD SCAN: Immer strahlend Weiß (Zwingend für Kassenscanner) */}
           {fullscreenCode && (
             <div className="fixed inset-0 z-[200] bg-white flex items-center justify-center animate-in zoom-in-95 duration-200" onClick={() => setFullscreenCode(null)}>
               <button className="absolute top-12 right-6 p-3 bg-gray-100 rounded-full text-black z-50"><X size={28} /></button>
@@ -376,7 +405,6 @@
             </div>
           )}
 
-          {/* MODALS */}
           {redeemModal.isOpen && (
             <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-3xl p-6 shadow-2xl mb-8">
@@ -399,7 +427,6 @@
       );
     }
 
-    // Hilfs-Komponente für das Liquid Design der Bottom Nav
     function LiquidNavItem({ icon: Icon, label, active, onClick }) {
       return (
         <div 
@@ -443,7 +470,8 @@
         <div onClick={!isArchivedView ? onFullscreen : undefined} className={`relative w-full rounded-[2rem] shadow-xl overflow-hidden text-white bg-gradient-to-br ${card.colorCode || 'from-gray-700 to-gray-900'} transition-transform active:scale-[0.98]`}>
           <div className="p-6 pb-4 flex justify-between items-start">
             <div className="flex-1 pr-4">
-              <h2 className="text-2xl font-bold tracking-tight shadow-sm leading-tight">{card.title}</h2>
+              {/* Die Schatten wurden hier komplett entfernt (kein shadow-sm mehr) */}
+              <h2 className="text-2xl font-bold tracking-tight leading-tight">{card.title}</h2>
               <p className="text-white/80 font-medium mt-1">{card.description}</p>
             </div>
             <div className="flex flex-col items-end space-y-3">
@@ -459,6 +487,7 @@
             <div className="px-6 pb-6 pt-2">
               <div className="flex justify-between items-end mb-2">
                 <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Restwert</span>
+                {/* Auch hier kein Text-Shadow mehr */}
                 <span className="text-3xl font-bold">{formatCurrency(card.currentValue || 0)}</span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden shadow-inner">
@@ -599,7 +628,7 @@
               <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase mb-2">Logo</label>
               <label className="flex items-center justify-between w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition">
                 {formData.image ? (
-                   <div className="flex items-center space-x-4"><div className="w-12 h-12 bg-white rounded-xl p-1 shadow-sm border border-gray-200"><img src={formData.image} alt="Preview" className="w-full h-full rounded-lg object-cover" /></div><span className="text-sm font-semibold text-green-600">Bild geladen</span></div>
+                   <div className="flex items-center space-x-4"><div className="w-12 h-12 bg-white rounded-xl p-1 shadow-sm border border-gray-200"><img src={formData.image} alt="Preview" className="w-full h-full rounded-lg object-cover" /></div><span className="text-sm font-semibold text-green-600">Bild geladen (Ändern)</span></div>
                 ) : ( <div className="flex items-center space-x-2 text-gray-500 dark:text-gray-400"><Upload size={18} /><span className="font-semibold">Logo wählen</span></div> )}
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files[0]; if(f){ const r = new FileReader(); r.onloadend=()=>setFormData({...formData, image: r.result}); r.readAsDataURL(f); } }} />
               </label>
