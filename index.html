@@ -7,13 +7,11 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="NexWallet">
   
-  <!-- App Icon -->
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" href="apple-touch-icon.png">
   
   <title>NexWallet Pro</title>
 
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -22,12 +20,10 @@
     }
   </script>
 
-  <!-- Scanner Bibliotheken -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
 
-  <!-- React & Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="importmap">
     {
@@ -40,42 +36,83 @@
   </script>
 
   <style>
-    /* Absoluter Fix gegen das Safari Bouncen und weiße Ränder! */
-    html, body { 
-      height: 100%; width: 100%; 
-      overflow: hidden; 
-      position: fixed; /* Sperrt die Seite komplett ein */
+    /* Native Body Scrolling - Verhindert iOS Safe-Area Bugs */
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0; padding: 0;
       -webkit-tap-highlight-color: transparent; 
       background-color: #f3f4f6; /* bg-gray-100 */
+      color: #111827;
     }
     @media (prefers-color-scheme: dark) {
-      html, body { background-color: #111827; /* bg-gray-900 */ }
+      body { background-color: #111827; color: #f3f4f6; }
     }
 
-    /* Safe Area Padding für den Header */
-    .pt-safe { padding-top: max(1rem, env(safe-area-inset-top)); }
-    
-    /* Genug Platz im Main-Content, damit die Karten nicht hinter der Menüleiste verschwinden */
-    .main-content {
-       padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
+    /* Fixed Header Styling */
+    .header-fixed {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      padding-top: max(16px, env(safe-area-inset-top));
+      z-index: 40;
     }
 
-    /* Liquid Nav (Die schwebende Menüleiste) */
+    /* Main Content Padding (um nicht unter Header/Nav zu verschwinden) */
+    .main-wrapper {
+      padding-top: max(130px, env(safe-area-inset-top) + 110px);
+      padding-bottom: max(120px, env(safe-area-inset-bottom) + 100px);
+      min-height: 100vh;
+    }
+
+    /* --- LIQUID BOTTOM NAVIGATION (Wie Messdiener-App) --- */
     .liquid-nav {
       position: fixed;
       bottom: max(24px, env(safe-area-inset-bottom));
       left: 50%;
       transform: translateX(-50%);
-      z-index: 50;
-      transition: transform 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.4s ease;
+      background: rgba(255, 255, 255, 0.75);
+      backdrop-filter: blur(30px) saturate(200%);
+      -webkit-backdrop-filter: blur(30px) saturate(200%);
+      border-radius: 40px;
+      display: flex;
+      padding: 8px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+      z-index: 1000;
+      /* Schnellere, federnde Animation */
+      transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.2s ease;
+    }
+    @media (prefers-color-scheme: dark) {
+      .liquid-nav {
+        background: rgba(30, 30, 30, 0.75);
+        box-shadow: 0 12px 40px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+      }
     }
     
-    /* Klasse, die hinzugefügt wird, wenn die Tastatur sich öffnet */
     .liquid-nav.keyboard-open {
       transform: translate(-50%, 150%);
       opacity: 0;
       pointer-events: none;
+    }
+
+    .nav-item {
+      padding: 10px 24px;
+      border-radius: 30px;
+      font-weight: 600;
+      font-size: 14px;
+      color: #6b7280; /* text-gray-500 */
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+      user-select: none;
+      white-space: nowrap;
+    }
+    @media (prefers-color-scheme: dark) { .nav-item { color: #9ca3af; } }
+    
+    .nav-item.active {
+      background: #2563eb; /* text-blue-600 */
+      color: white;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
     }
 
     /* Scrollbars unsichtbar */
@@ -84,7 +121,7 @@
   </style>
 </head>
 <body>
-  <div id="root" class="h-full w-full"></div>
+  <div id="root"></div>
 
   <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useRef } from 'react';
@@ -121,8 +158,6 @@
       const [redeemAmount, setRedeemAmount] = useState('');
       const [fullscreenCode, setFullscreenCode] = useState(null);
       const [toast, setToast] = useState(null);
-      
-      // NEU: Keyboard Status für die Menüleiste
       const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
       useEffect(() => {
@@ -131,18 +166,13 @@
       }, [cards, templates]);
 
       useEffect(() => {
-        // Service Worker Registrierung
         if ('serviceWorker' in navigator) {
-          const swCode = `
-            self.addEventListener('fetch', (event) => {
-              event.respondWith(caches.match(event.request).then(res => res || fetch(event.request)));
-            });
-          `;
+          const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(res => res || fetch(e.request))); });`;
           const blob = new Blob([swCode], {type: 'application/javascript'});
           navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
         }
 
-        // Tastatur Event-Listener (Analog zu Messdiener-App)
+        // Schnelle, direkte Tastatur-Erkennung
         const handleFocusIn = (e) => {
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) setIsKeyboardOpen(true);
         };
@@ -152,7 +182,7 @@
                     if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
                         setIsKeyboardOpen(false);
                     }
-                }, 50);
+                }, 20); // Reduziert für flotteres Feeling
             }
         };
 
@@ -170,6 +200,12 @@
           setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category);
           setPreviousView('wallet'); setCurrentView('creator');
           window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (cards.length === 0) {
+          setCards([{
+            id: '1', title: 'Kino Gutschein', description: 'Gilt für alle Filme', image: null,
+            initialValue: 30.00, currentValue: 15.00, codeType: 'BARCODE', codeValue: '202666825915', 
+            category: 'coupon', isGifted: false, isRedeemed: false, colorCode: 'from-orange-400 to-red-500'
+          }]);
         }
 
         return () => {
@@ -218,7 +254,6 @@
       const importData = (event) => {
         const files = event.target.files;
         if (!files.length) return;
-
         Array.from(files).forEach(file => {
           const reader = new FileReader();
           reader.onload = (e) => {
@@ -242,11 +277,11 @@
       const presentCategories = [...new Set(activeCards.map(c => c.category || 'custom'))];
 
       return (
-        <div className="fixed inset-0 w-full h-full bg-gray-100 dark:bg-gray-900 font-sans text-gray-900 dark:text-gray-100 flex flex-col select-none transition-colors duration-300">
-          
-          <header className="flex-none pt-safe bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-700 px-5 pb-2 z-40">
-            <div className="flex justify-between items-center pb-2 mt-4">
-              <h1 className="text-[28px] leading-none font-bold tracking-tight">
+        <div>
+          {/* FESTGEPINNTER HEADER */}
+          <header className="header-fixed bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200 dark:border-gray-800 px-5 pb-2">
+            <div className="flex justify-between items-center pb-2 mt-2">
+              <h1 className="text-[32px] leading-tight font-extrabold tracking-tight">
                 {currentView === 'wallet' && 'NexWallet'}
                 {currentView === 'gifted' && 'Archiv'}
                 {currentView === 'category-select' && 'Neu erstellen'}
@@ -254,7 +289,7 @@
               </h1>
               {(currentView === 'wallet' || currentView === 'gifted') && (
                 <div className="flex space-x-2">
-                  <label className="cursor-pointer p-2 bg-gray-100 dark:bg-gray-700 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition active:scale-90">
+                  <label className="cursor-pointer p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition active:scale-90">
                     <Upload size={18} className="text-gray-700 dark:text-gray-200" />
                     <input type="file" multiple accept=".nexwallet,.json" className="hidden" onChange={importData} />
                   </label>
@@ -273,7 +308,7 @@
               <div className="pt-2 pb-1 overflow-x-auto hide-scrollbar flex space-x-2">
                 <button 
                   onClick={() => setActiveCategoryTab('all')}
-                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === 'all' ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}
+                  className={`whitespace-nowrap px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === 'all' ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-300'}`}
                 >
                   Alle
                 </button>
@@ -281,7 +316,7 @@
                   <button 
                     key={cat}
                     onClick={() => setActiveCategoryTab(cat)}
-                    className={`whitespace-nowrap flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === cat ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-300'}`}
+                    className={`whitespace-nowrap flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-bold transition ${activeCategoryTab === cat ? 'bg-black dark:bg-white text-white dark:text-black' : 'bg-gray-200 dark:bg-gray-800 text-gray-500 dark:text-gray-300'}`}
                   >
                     {React.createElement(CATEGORIES[cat].icon, { size: 14 })}
                     {CATEGORIES[cat].label}
@@ -297,7 +332,8 @@
             </div>
           )}
 
-          <main className="flex-1 overflow-y-auto px-4 pt-6 main-content relative">
+          {/* HAUPTINHALT SCROLLBAR */}
+          <main className="main-wrapper px-4">
             {currentView === 'wallet' && (
               <div className="space-y-6">
                 {activeCards.length === 0 ? (
@@ -388,13 +424,20 @@
             )}
           </main>
 
-          {/* LIQUID BOTTOM NAVIGATION */}
-          <nav className={`liquid-nav bg-white/75 dark:bg-gray-800/75 backdrop-blur-[30px] saturate-200 rounded-[40px] flex p-2 shadow-[0_12px_40px_rgba(0,0,0,0.12),0_0_0_1px_rgba(0,0,0,0.05)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.3),0_0_0_1px_rgba(255,255,255,0.05)] ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
-            <LiquidNavItem icon={Wallet} label="Wallet" active={currentView === 'wallet'} onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} />
-            <LiquidNavItem icon={PlusCircle} label="Neu" active={currentView === 'creator' || currentView === 'category-select'} onClick={() => { setPreviousView(currentView); setEditingCard(null); setCurrentView('category-select'); }} />
-            <LiquidNavItem icon={Archive} label="Archiv" active={currentView === 'gifted'} onClick={() => setCurrentView('gifted')} />
+          {/* LIQUID NAVIGATION (Schwebende Pille) */}
+          <nav className={`liquid-nav ${isKeyboardOpen ? 'keyboard-open' : ''}`}>
+            <div onClick={() => { setActiveCategoryTab('all'); setCurrentView('wallet'); }} className={`nav-item ${currentView === 'wallet' ? 'active' : ''}`}>
+              <Wallet size={18} /><span>Wallet</span>
+            </div>
+            <div onClick={() => { setPreviousView(currentView); setEditingCard(null); setCurrentView('category-select'); }} className={`nav-item ${(currentView === 'creator' || currentView === 'category-select') && !editingCard ? 'active' : ''}`}>
+              <PlusCircle size={18} /><span>Neu</span>
+            </div>
+            <div onClick={() => setCurrentView('gifted')} className={`nav-item ${currentView === 'gifted' ? 'active' : ''}`}>
+              <Archive size={18} /><span>Archiv</span>
+            </div>
           </nav>
 
+          {/* OVERLAYS (Scanner & Modal) bleiben wie bisher fixed über allem */}
           {fullscreenCode && (
             <div className="fixed inset-0 z-[200] bg-white flex items-center justify-center animate-in zoom-in-95 duration-200" onClick={() => setFullscreenCode(null)}>
               <button className="absolute top-12 right-6 p-3 bg-gray-100 rounded-full text-black z-50"><X size={28} /></button>
@@ -427,22 +470,6 @@
       );
     }
 
-    function LiquidNavItem({ icon: Icon, label, active, onClick }) {
-      return (
-        <div 
-          onClick={onClick}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-[30px] text-[14px] font-semibold cursor-pointer transition-all duration-300 select-none whitespace-nowrap ${
-            active 
-              ? 'bg-blue-600 text-white shadow-[0_4px_14px_rgba(37,99,235,0.35)]' 
-              : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100'
-          }`}
-        >
-          <Icon size={18} />
-          <span>{label}</span>
-        </div>
-      );
-    }
-
     function LocalCodeGenerator({ type, value, className }) {
       const canvasRef = useRef(null);
       const svgRef = useRef(null);
@@ -470,7 +497,7 @@
         <div onClick={!isArchivedView ? onFullscreen : undefined} className={`relative w-full rounded-[2rem] shadow-xl overflow-hidden text-white bg-gradient-to-br ${card.colorCode || 'from-gray-700 to-gray-900'} transition-transform active:scale-[0.98]`}>
           <div className="p-6 pb-4 flex justify-between items-start">
             <div className="flex-1 pr-4">
-              {/* Die Schatten wurden hier komplett entfernt (kein shadow-sm mehr) */}
+              {/* Text-Shadow wurde komplett entfernt (kein shadow-sm mehr in der Klasse) */}
               <h2 className="text-2xl font-bold tracking-tight leading-tight">{card.title}</h2>
               <p className="text-white/80 font-medium mt-1">{card.description}</p>
             </div>
@@ -487,7 +514,6 @@
             <div className="px-6 pb-6 pt-2">
               <div className="flex justify-between items-end mb-2">
                 <span className="text-xs font-bold text-white/60 uppercase tracking-widest">Restwert</span>
-                {/* Auch hier kein Text-Shadow mehr */}
                 <span className="text-3xl font-bold">{formatCurrency(card.currentValue || 0)}</span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-2 overflow-hidden shadow-inner">
