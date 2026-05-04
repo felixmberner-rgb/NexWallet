@@ -135,7 +135,7 @@
     import { 
       PlusCircle, Wallet, Archive, Upload, Download, X, Check,
       MinusCircle, CreditCard, RefreshCcw, Image as ImageIcon,
-      Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square, Lock
+      Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square, Lock, Clipboard
     } from 'lucide-react';
 
     const CATEGORIES = {
@@ -184,47 +184,6 @@
         }
       }, [cards, activeCategoryTab]);
 
-      // --- DER NEUE BULLETPROOF URL PARSER ---
-      const checkUrlForCreate = () => {
-        const urlHref = window.location.href;
-        if (urlHref.includes('action=create')) {
-          try {
-            // Unzerstörbarer Regex Parser für JEDES Protokoll (http, webapp, etc.)
-            const getParam = (param) => {
-               const regex = new RegExp('[?&]' + param + '=([^&]*)', 'i');
-               const match = urlHref.match(regex);
-               return match ? decodeURIComponent(match[1]) : '';
-            };
-            
-            const shortcutCard = {
-              title: getParam('title'), 
-              description: getParam('desc'),
-              initialValue: getParam('val'), 
-              codeValue: getParam('code'),
-              codeType: getParam('type') || 'BARCODE', 
-              category: getParam('cat') || 'coupon',
-              expiryDate: getParam('expiry'), 
-              pin: getParam('pin'),
-              customOptions: { canRedeem: true, canGift: true }
-            };
-            
-            setEditingCard(shortcutCard); 
-            setSelectedCategory(shortcutCard.category || 'custom');
-            setCurrentView('wallet');
-            
-            // Timeout garantiert, dass React Zeit hat, das DOM zu laden
-            setTimeout(() => {
-                setIsCreatorOpen(true);
-            }, 100);
-            
-            // URL bereinigen, damit ein erneutes Neuladen nicht sofort wieder den Ersteller öffnet
-            try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
-          } catch(e) {
-            console.error("URL Parse Error:", e);
-          }
-        }
-      };
-
       useEffect(() => {
         const today = new Date().toISOString().split('T')[0];
         setCards(prevCards => {
@@ -255,24 +214,34 @@
             }
         };
 
-        // Fängt App-Aufwachen aus dem Hintergrund ab
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                checkUrlForCreate();
-            }
-        };
-
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
-        document.addEventListener('visibilitychange', handleVisibilityChange);
 
-        // Erster Aufruf beim App-Start
-        checkUrlForCreate();
+        // Fallback: Falls jemand die URL in Safari öffnet, funktioniert es hierüber weiterhin
+        const urlHref = window.location.href;
+        if (urlHref.includes('action=create')) {
+          try {
+            const getParam = (param) => {
+               const regex = new RegExp('[?&]' + param + '=([^&]*)', 'i');
+               const match = urlHref.match(regex);
+               return match ? decodeURIComponent(match[1]) : '';
+            };
+            const shortcutCard = {
+              title: getParam('title'), description: getParam('desc'),
+              initialValue: getParam('val'), codeValue: getParam('code'),
+              codeType: getParam('type') || 'BARCODE', category: getParam('cat') || 'coupon',
+              expiryDate: getParam('expiry'), pin: getParam('pin'),
+              customOptions: { canRedeem: true, canGift: true }
+            };
+            setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category || 'custom');
+            setCurrentView('wallet'); setTimeout(() => setIsCreatorOpen(true), 100);
+            try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
+          } catch(e) {}
+        }
 
         return () => {
            document.removeEventListener('focusin', handleFocusIn);
            document.removeEventListener('focusout', handleFocusOut);
-           document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
       }, []);
 
@@ -339,6 +308,40 @@
         throw new Error("Ungültiges Format");
       };
 
+      // --- NEU: ZWISCHENABLAGE (SMART PASTE) LOGIK ---
+      const importFromClipboard = async () => {
+        try {
+          const text = await navigator.clipboard.readText();
+          if (!text) {
+             showToast("Zwischenablage ist leer!");
+             return;
+          }
+          const data = parseImportedFile(text);
+          const list = Array.isArray(data) ? data : [data];
+          
+          if (list.length > 0) {
+              const shortcutCard = {
+                title: list[0].title || '', 
+                description: list[0].description || '',
+                initialValue: list[0].initialValue || '', 
+                codeValue: list[0].codeValue || '',
+                codeType: list[0].codeType || 'BARCODE', 
+                category: list[0].category || 'coupon',
+                expiryDate: list[0].expiryDate || '', 
+                pin: list[0].pin || '',
+                customOptions: list[0].customOptions || { canRedeem: true, canGift: true }
+              };
+              setEditingCard(shortcutCard); 
+              setSelectedCategory(shortcutCard.category || 'custom');
+              setCurrentView('wallet');
+              setIsCreatorOpen(true);
+          }
+        } catch(err) {
+          console.error("Clipboard Error:", err);
+          alert("Kein gültiger Karten-Code in der Zwischenablage gefunden. Bitte kopiere das Ergebnis zuerst!");
+        }
+      };
+
       const importData = (event) => {
         const files = event.target.files;
         if (!files.length) return;
@@ -363,7 +366,7 @@
 
               showToast("Import erfolgreich");
             } catch(err) {
-              alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Kurzbefehle-App korrekten Text speichert.");
+              alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Datei validen Text enthält.");
             }
           };
           reader.readAsText(file);
@@ -395,6 +398,12 @@
               </h1>
               {(currentView === 'wallet' || currentView === 'gifted') && (
                 <div className="flex space-x-2">
+                  
+                  {/* NEU: Smart Paste Button */}
+                  <button onClick={importFromClipboard} className="p-2 bg-blue-50 dark:bg-blue-900/40 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/60 transition active:scale-90">
+                    <Clipboard size={18} className="text-blue-600 dark:text-blue-400" />
+                  </button>
+
                   <label className="cursor-pointer p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition active:scale-90">
                     <Upload size={18} className="text-gray-700 dark:text-gray-200" />
                     <input type="file" multiple accept=".nexwallet,.json,.txt,.rtf,*/*" className="hidden" onChange={importData} />
@@ -403,8 +412,8 @@
                     const blob = new Blob([JSON.stringify(cards)], {type: 'application/json'});
                     const a = document.createElement('a');
                     a.href = URL.createObjectURL(blob); a.download = `NexWallet_Export.nexwallet`; a.click();
-                  }} className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/50 transition active:scale-90">
-                    <Download size={18} className="text-blue-600 dark:text-blue-400" />
+                  }} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition active:scale-90">
+                    <Download size={18} className="text-gray-700 dark:text-gray-200" />
                   </button>
                 </div>
               )}
