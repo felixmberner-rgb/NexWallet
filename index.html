@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -217,30 +218,36 @@
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
 
-        // --- URL DEEP LINKING ---
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('action') === 'create') {
-          // Erstellt das Card-Objekt aus den URL-Parametern
-          const shortcutCard = {
-            title: params.get('title') || '', 
-            description: params.get('desc') || '',
-            initialValue: params.get('val') || '', 
-            codeValue: params.get('code') || '',
-            codeType: params.get('type') || 'BARCODE', 
-            category: params.get('cat') || 'coupon',
-            expiryDate: params.get('expiry') || '', 
-            pin: params.get('pin') || '',
-            customOptions: { canRedeem: true, canGift: true }
-          };
-          
-          // Setzt die Daten und öffnet sofort das Pop-Up
-          setEditingCard(shortcutCard); 
-          setSelectedCategory(shortcutCard.category || 'custom');
-          setCurrentView('wallet');
-          setIsCreatorOpen(true);
-          
-          // Löscht die Parameter aus der Adressleiste, damit sie beim Neuladen nicht nochmal triggern
-          window.history.replaceState({}, document.title, window.location.pathname);
+        // --- BULLETPROOF URL PARSER ---
+        const urlHref = window.location.href;
+        if (urlHref.includes('action=create')) {
+          try {
+            // Findet den Query-String, egal ob er durch Hash-Routing versteckt ist
+            const queryString = urlHref.substring(urlHref.indexOf('?'));
+            const params = new URLSearchParams(queryString);
+            
+            const shortcutCard = {
+              title: params.get('title') || '', 
+              description: params.get('desc') || '',
+              initialValue: params.get('val') || '', 
+              codeValue: params.get('code') || '',
+              codeType: params.get('type') || 'BARCODE', 
+              category: params.get('cat') || 'coupon',
+              expiryDate: params.get('expiry') || '', 
+              pin: params.get('pin') || '',
+              customOptions: { canRedeem: true, canGift: true }
+            };
+            
+            setEditingCard(shortcutCard); 
+            setSelectedCategory(shortcutCard.category || 'custom');
+            setCurrentView('wallet');
+            setIsCreatorOpen(true);
+            
+            // Link säubern
+            window.history.replaceState({}, document.title, window.location.pathname);
+          } catch(e) {
+            console.error("Fehler beim URL Parsen", e);
+          }
         }
 
         return () => {
@@ -718,9 +725,9 @@
       });
       
       const [isScanning, setIsScanning] = useState(false);
-      
       const [showExpiryField, setShowExpiryField] = useState(!!initialData?.expiryDate);
       const [showPinField, setShowPinField] = useState(!!initialData?.pin);
+      const [showDel, setShowDel] = useState(false);
 
       const colors = ['from-blue-500 to-indigo-600', 'from-orange-400 to-red-500', 'from-emerald-400 to-teal-500', 'from-pink-500 to-rose-600', 'from-gray-700 to-gray-900', 'from-yellow-400 to-orange-500'];
 
