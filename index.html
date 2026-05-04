@@ -184,6 +184,47 @@
         }
       }, [cards, activeCategoryTab]);
 
+      // --- DER NEUE BULLETPROOF URL PARSER ---
+      const checkUrlForCreate = () => {
+        const urlHref = window.location.href;
+        if (urlHref.includes('action=create')) {
+          try {
+            // Unzerstörbarer Regex Parser für JEDES Protokoll (http, webapp, etc.)
+            const getParam = (param) => {
+               const regex = new RegExp('[?&]' + param + '=([^&]*)', 'i');
+               const match = urlHref.match(regex);
+               return match ? decodeURIComponent(match[1]) : '';
+            };
+            
+            const shortcutCard = {
+              title: getParam('title'), 
+              description: getParam('desc'),
+              initialValue: getParam('val'), 
+              codeValue: getParam('code'),
+              codeType: getParam('type') || 'BARCODE', 
+              category: getParam('cat') || 'coupon',
+              expiryDate: getParam('expiry'), 
+              pin: getParam('pin'),
+              customOptions: { canRedeem: true, canGift: true }
+            };
+            
+            setEditingCard(shortcutCard); 
+            setSelectedCategory(shortcutCard.category || 'custom');
+            setCurrentView('wallet');
+            
+            // Timeout garantiert, dass React Zeit hat, das DOM zu laden
+            setTimeout(() => {
+                setIsCreatorOpen(true);
+            }, 100);
+            
+            // URL bereinigen, damit ein erneutes Neuladen nicht sofort wieder den Ersteller öffnet
+            try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
+          } catch(e) {
+            console.error("URL Parse Error:", e);
+          }
+        }
+      };
+
       useEffect(() => {
         const today = new Date().toISOString().split('T')[0];
         setCards(prevCards => {
@@ -214,44 +255,24 @@
             }
         };
 
+        // Fängt App-Aufwachen aus dem Hintergrund ab
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                checkUrlForCreate();
+            }
+        };
+
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
 
-        // --- BULLETPROOF URL PARSER ---
-        const urlHref = window.location.href;
-        if (urlHref.includes('action=create')) {
-          try {
-            // Findet den Query-String, egal ob er durch Hash-Routing versteckt ist
-            const queryString = urlHref.substring(urlHref.indexOf('?'));
-            const params = new URLSearchParams(queryString);
-            
-            const shortcutCard = {
-              title: params.get('title') || '', 
-              description: params.get('desc') || '',
-              initialValue: params.get('val') || '', 
-              codeValue: params.get('code') || '',
-              codeType: params.get('type') || 'BARCODE', 
-              category: params.get('cat') || 'coupon',
-              expiryDate: params.get('expiry') || '', 
-              pin: params.get('pin') || '',
-              customOptions: { canRedeem: true, canGift: true }
-            };
-            
-            setEditingCard(shortcutCard); 
-            setSelectedCategory(shortcutCard.category || 'custom');
-            setCurrentView('wallet');
-            setIsCreatorOpen(true);
-            
-            // Link säubern
-            window.history.replaceState({}, document.title, window.location.pathname);
-          } catch(e) {
-            console.error("Fehler beim URL Parsen", e);
-          }
-        }
+        // Erster Aufruf beim App-Start
+        checkUrlForCreate();
 
         return () => {
            document.removeEventListener('focusin', handleFocusIn);
            document.removeEventListener('focusout', handleFocusOut);
+           document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
       }, []);
 
@@ -342,7 +363,6 @@
 
               showToast("Import erfolgreich");
             } catch(err) {
-              console.error("Import Fehler:", err);
               alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Kurzbefehle-App korrekten Text speichert.");
             }
           };
