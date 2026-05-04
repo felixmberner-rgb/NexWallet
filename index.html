@@ -177,7 +177,6 @@
         localStorage.setItem('nex_templates', JSON.stringify(templates));
       }, [cards, templates]);
 
-      // NEU: Automatischer Fallback auf "Alle", falls der aktuelle Tab wegkonvertiert oder gelöscht wurde
       useEffect(() => {
         const currentCats = [...new Set(cards.filter(c => !c.isGifted && !c.isRedeemed).map(c => CATEGORIES[c.category] ? c.category : 'custom'))];
         if (activeCategoryTab !== 'all' && !currentCats.includes(activeCategoryTab)) {
@@ -218,19 +217,29 @@
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
 
+        // --- URL DEEP LINKING ---
         const params = new URLSearchParams(window.location.search);
         if (params.get('action') === 'create') {
+          // Erstellt das Card-Objekt aus den URL-Parametern
           const shortcutCard = {
-            title: params.get('title') || '', description: params.get('desc') || '',
-            initialValue: params.get('val') || '', codeValue: params.get('code') || '',
-            codeType: params.get('type') || 'BARCODE', category: params.get('cat') || 'coupon',
-            expiryDate: params.get('expiry') || '', pin: params.get('pin') || '',
+            title: params.get('title') || '', 
+            description: params.get('desc') || '',
+            initialValue: params.get('val') || '', 
+            codeValue: params.get('code') || '',
+            codeType: params.get('type') || 'BARCODE', 
+            category: params.get('cat') || 'coupon',
+            expiryDate: params.get('expiry') || '', 
+            pin: params.get('pin') || '',
             customOptions: { canRedeem: true, canGift: true }
           };
+          
+          // Setzt die Daten und öffnet sofort das Pop-Up
           setEditingCard(shortcutCard); 
           setSelectedCategory(shortcutCard.category || 'custom');
           setCurrentView('wallet');
           setIsCreatorOpen(true);
+          
+          // Löscht die Parameter aus der Adressleiste, damit sie beim Neuladen nicht nochmal triggern
           window.history.replaceState({}, document.title, window.location.pathname);
         }
 
@@ -588,7 +597,6 @@
       const canGift = isCoupon || isTicket || (card.category === 'custom' && card.customOptions?.canGift);
       const percentLeft = card.initialValue > 0 ? (card.currentValue / card.initialValue) * 100 : 0;
       
-      // Nur Werte anzeigen, wenn es auch zur Kategorie passt (Ticket + Loyalty verbergen die Werte!)
       const showValueBlock = isCoupon || (card.category === 'custom' && card.customOptions?.canRedeem);
 
       const renderDate = (dateStr) => {
@@ -692,9 +700,8 @@
     }
 
     function CardCreator({ initialData, category, onSave, onSaveTemplate, onCancel, onDelete }) {
-      // HIER WIRD NUN ALLES DYNAMISCH ÜBER formData GESTEUERT!
-      const defaultExpiry = category === 'coupon' ? `${new Date().getFullYear() + 3}-12-31` : '';
-      
+      const catData = CATEGORIES[category] || CATEGORIES['custom'];
+
       const [formData, setFormData] = useState({
         title: initialData?.title || '', 
         description: initialData?.description || '', 
@@ -705,28 +712,23 @@
         codeValue: initialData?.codeValue || '', 
         colorCode: initialData?.colorCode || 'from-blue-500 to-indigo-600', 
         category: category || 'custom', 
-        expiryDate: initialData ? (initialData.expiryDate || '') : defaultExpiry,
+        expiryDate: initialData?.expiryDate || '',
         pin: initialData?.pin || '',
         customOptions: initialData?.customOptions || { canRedeem: true, canGift: true }
       });
       
       const [isScanning, setIsScanning] = useState(false);
-      const [showDel, setShowDel] = useState(false);
-
+      
       const [showExpiryField, setShowExpiryField] = useState(!!initialData?.expiryDate);
       const [showPinField, setShowPinField] = useState(!!initialData?.pin);
 
       const colors = ['from-blue-500 to-indigo-600', 'from-orange-400 to-red-500', 'from-emerald-400 to-teal-500', 'from-pink-500 to-rose-600', 'from-gray-700 to-gray-900', 'from-yellow-400 to-orange-500'];
-      
-      // Nutzt das dynamische formData.category für die Anzeige!
-      const catData = CATEGORIES[formData.category] || CATEGORIES['custom'];
 
       const saveAction = () => {
         if (!formData.title) return alert('Bitte gib zumindest einen Titel ein.');
         let initVal = isNaN(parseFloat(String(formData.initialValue).replace(',', '.'))) ? 0 : parseFloat(String(formData.initialValue).replace(',', '.'));
         let currVal = isNaN(parseFloat(String(formData.currentValue).replace(',', '.'))) ? initVal : parseFloat(String(formData.currentValue).replace(',', '.'));
         
-        // Werte auf 0 setzen, wenn sie nicht unterstützt werden
         if (formData.category === 'ticket' || formData.category === 'loyalty' || (formData.category === 'custom' && !formData.customOptions.canRedeem)) {
             initVal = 0;
             currVal = 0;
@@ -741,6 +743,7 @@
           initialValue: initVal, 
           currentValue: currVal, 
           expiryDate: finalExpiry,
+          pin: formData.pin,
           category: formData.category 
         });
       };
@@ -791,7 +794,6 @@
               </div>
             </div>
 
-            {/* DYNAMISCHES AUSBLENDEN BEI KONVERTIERUNG */}
             {(formData.category === 'coupon' || (formData.category === 'custom' && formData.customOptions.canRedeem)) && (
               <div className="flex space-x-4 animate-in fade-in slide-in-from-top-2">
                 <div className="flex-1">
