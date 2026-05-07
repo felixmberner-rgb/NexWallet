@@ -20,9 +20,13 @@
     }
   </script>
 
+  <!-- Barcode & QR Generatoren -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
   <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+  
+  <!-- PDF Generator -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script type="importmap">
@@ -135,7 +139,8 @@
     import { 
       PlusCircle, Wallet, Archive, Upload, Download, X, Check,
       MinusCircle, CreditCard, RefreshCcw, Image as ImageIcon,
-      Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square, Lock, Clipboard
+      Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square, Lock, Clipboard,
+      FileText, Share
     } from 'lucide-react';
 
     const CATEGORIES = {
@@ -167,10 +172,12 @@
       const [selectedCategory, setSelectedCategory] = useState('custom');
 
       const [redeemModal, setRedeemModal] = useState({ isOpen: false, cardId: null });
+      const [giftModal, setGiftModal] = useState({ isOpen: false, card: null }); // NEU: Gift Modal State
       const [redeemAmount, setRedeemAmount] = useState('');
       const [fullscreenCode, setFullscreenCode] = useState(null);
       const [toast, setToast] = useState(null);
       const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+      const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
       useEffect(() => {
         localStorage.setItem('nex_cards', JSON.stringify(cards));
@@ -183,6 +190,35 @@
           setActiveCategoryTab('all');
         }
       }, [cards, activeCategoryTab]);
+
+      const checkUrlForCreate = () => {
+        const urlHref = window.location.href;
+        if (urlHref.includes('action=create')) {
+          try {
+            const getParam = (param) => {
+               const regex = new RegExp('[?&]' + param + '=([^&]*)', 'i');
+               const match = urlHref.match(regex);
+               return match ? decodeURIComponent(match[1]) : '';
+            };
+            
+            const shortcutCard = {
+              title: getParam('title'), description: getParam('desc'),
+              initialValue: getParam('val'), codeValue: getParam('code'),
+              codeType: getParam('type') || 'BARCODE', category: getParam('cat') || 'coupon',
+              expiryDate: getParam('expiry'), pin: getParam('pin'),
+              customOptions: { canRedeem: true, canGift: true }
+            };
+            
+            setEditingCard(shortcutCard); 
+            setSelectedCategory(shortcutCard.category || 'custom');
+            setCurrentView('wallet');
+            setTimeout(() => setIsCreatorOpen(true), 100);
+            try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
+          } catch(e) {
+            console.error("URL Parse Error:", e);
+          }
+        }
+      };
 
       useEffect(() => {
         const today = new Date().toISOString().split('T')[0];
@@ -214,34 +250,21 @@
             }
         };
 
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                checkUrlForCreate();
+            }
+        };
+
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
-
-        // Fallback: Falls jemand die URL in Safari öffnet, funktioniert es hierüber weiterhin
-        const urlHref = window.location.href;
-        if (urlHref.includes('action=create')) {
-          try {
-            const getParam = (param) => {
-               const regex = new RegExp('[?&]' + param + '=([^&]*)', 'i');
-               const match = urlHref.match(regex);
-               return match ? decodeURIComponent(match[1]) : '';
-            };
-            const shortcutCard = {
-              title: getParam('title'), description: getParam('desc'),
-              initialValue: getParam('val'), codeValue: getParam('code'),
-              codeType: getParam('type') || 'BARCODE', category: getParam('cat') || 'coupon',
-              expiryDate: getParam('expiry'), pin: getParam('pin'),
-              customOptions: { canRedeem: true, canGift: true }
-            };
-            setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category || 'custom');
-            setCurrentView('wallet'); setTimeout(() => setIsCreatorOpen(true), 100);
-            try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
-          } catch(e) {}
-        }
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        checkUrlForCreate();
 
         return () => {
            document.removeEventListener('focusin', handleFocusIn);
            document.removeEventListener('focusout', handleFocusOut);
+           document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
       }, []);
 
@@ -270,8 +293,136 @@
         showToast("Eingelöst und archiviert");
       };
 
-      const toggleGifted = (id) => {
-        setCards(cards.map(card => card.id === id ? { ...card, isGifted: !card.isGifted } : card));
+      // --- NEU: DIE LOGIK FÜR DAS VERSCHENKEN MENÜ ---
+      
+      const doArchiveCard = (id) => {
+        setCards(prev => prev.map(card => card.id === id ? { ...card, isGifted: true } : card));
+      };
+
+      const handleArchiveOnly = (id) => {
+        doArchiveCard(id);
+        showToast("Geschenk im Archiv abgelegt");
+        setGiftModal({ isOpen: false, card: null });
+      };
+
+      const handleShareNexWallet = async (card) => {
+        const jsonStr = JSON.stringify([card]);
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const file = new File([blob], `${card.title.replace(/[^a-z0-9]/gi, '_')}.nexwallet`, { type: 'application/json' });
+        
+        try {
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    files: [file],
+                    title: card.title,
+                    text: 'Hier ist deine Karte für NexWallet!'
+                });
+                doArchiveCard(card.id);
+            } else {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = file.name;
+                link.click();
+                doArchiveCard(card.id);
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError') console.error(e);
+        }
+        setGiftModal({ isOpen: false, card: null });
+      };
+
+      const handleSharePDF = async (card) => {
+        setIsGeneratingPdf(true);
+        showToast("PDF wird erstellt...");
+
+        // Unsichtbaren Container für das PDF Design bauen
+        const container = document.createElement('div');
+        container.style.position = 'absolute';
+        container.style.left = '-9999px';
+        container.style.top = '0';
+        
+        // Das wunderschöne Design der Karte (Din A5 Format quer)
+        const formatVal = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(card.currentValue || 0);
+        const formatExp = card.expiryDate ? new Date(card.expiryDate).toLocaleDateString('de-DE') : '';
+        const isTkt = card.category === 'ticket';
+
+        container.innerHTML = `
+          <div style="width: 842px; height: 595px; background: #f8fafc; padding: 40px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: -apple-system, sans-serif;">
+             <div style="width: 100%; height: 100%; background: white; border: 3px dashed #cbd5e1; border-radius: 30px; padding: 50px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
+                <div style="position: absolute; top: 30px; right: 40px; color: #f1f5f9; font-size: 80px; font-weight: 900; text-transform: uppercase; letter-spacing: 5px; z-index: 0;">${isTkt ? 'TICKET' : 'GUTSCHEIN'}</div>
+                
+                <div style="z-index: 1;">
+                    <h1 style="margin: 0; font-size: 52px; color: #111827; max-width: 500px; line-height: 1.1;">${card.title}</h1>
+                    <p style="margin: 15px 0 0 0; font-size: 24px; color: #6b7280; font-weight: 500;">${card.description}</p>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; z-index: 1; border-top: 2px solid #f1f5f9; padding-top: 30px; margin-top: auto;">
+                    <div>
+                        ${(card.initialValue > 0 || card.category === 'coupon') ? `<div style="margin-bottom: 20px;"><span style="font-size: 16px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 2px;">WERT</span><br><span style="font-size: 48px; font-weight: 900; color: #2563eb;">${formatVal}</span></div>` : ''}
+                        
+                        <div style="display: flex; gap: 40px;">
+                          ${formatExp ? `<div><span style="font-size: 14px; color: #9ca3af; text-transform: uppercase; font-weight: 700;">GÜLTIG BIS</span><br><span style="font-size: 22px; color: #111827; font-weight: 600;">${formatExp}</span></div>` : ''}
+                          ${card.pin ? `<div><span style="font-size: 14px; color: #9ca3af; text-transform: uppercase; font-weight: 700;">PIN / INFO</span><br><span style="font-size: 22px; color: #111827; font-weight: 600; font-family: monospace;">${card.pin}</span></div>` : ''}
+                        </div>
+                    </div>
+                    <div id="pdf-code" style="background: white; padding: 15px; border-radius: 16px; border: 1px solid #e2e8f0; display: inline-block;"></div>
+                </div>
+             </div>
+          </div>
+        `;
+        document.body.appendChild(container);
+
+        const codeContainer = container.querySelector('#pdf-code');
+        if (card.codeType === 'QR') {
+            const canvas = document.createElement('canvas');
+            codeContainer.appendChild(canvas);
+            await new Promise(res => window.QRCode.toCanvas(canvas, card.codeValue, { width: 140, margin: 0 }, res));
+        } else {
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            codeContainer.appendChild(svg);
+            window.JsBarcode(svg, card.codeValue, { format: "CODE128", displayValue: true, margin: 0, height: 70, fontSize: 18, width: 2.5 });
+        }
+
+        try {
+            const opt = {
+              margin: 0,
+              filename: `${card.title.replace(/\s+/g, '_')}.pdf`,
+              image: { type: 'jpeg', quality: 1 },
+              html2canvas: { scale: 2, useCORS: true },
+              jsPDF: { unit: 'px', format: [842, 595], orientation: 'landscape' }
+            };
+
+            const pdfBlob = await window.html2pdf().set(opt).from(container).outputPdf('blob');
+            const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
+            
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    files: [file],
+                    title: card.title,
+                    text: 'Hier ist dein ' + (isTkt ? 'Ticket' : 'Gutschein') + '!'
+                });
+                doArchiveCard(card.id);
+            } else {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(pdfBlob);
+                link.download = file.name;
+                link.click();
+                doArchiveCard(card.id);
+            }
+        } catch (e) {
+            if (e.name !== 'AbortError') {
+              console.error("PDF Export error:", e);
+              alert("Fehler beim Erstellen der PDF.");
+            }
+        } finally {
+            document.body.removeChild(container);
+            setIsGeneratingPdf(false);
+            setGiftModal({ isOpen: false, card: null });
+        }
+      };
+      
+      const toggleGiftedRestore = (id) => {
+        setCards(cards.map(card => card.id === id ? { ...card, isGifted: false } : card));
       };
 
       const deleteTemplate = (id, e) => {
@@ -286,88 +437,58 @@
         let text = String(fileText);
         text = text.replace(/```json/gi, '').replace(/```/gi, '');
         text = text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-
         try { return JSON.parse(text); } catch(e) {}
-
-        let startIdx = text.indexOf('[');
-        let objIdx = text.indexOf('{');
+        let startIdx = text.indexOf('['); let objIdx = text.indexOf('{');
         if (startIdx === -1 || (objIdx !== -1 && objIdx < startIdx)) startIdx = objIdx;
-        
-        let endIdx = text.lastIndexOf(']');
-        let objEndIdx = text.lastIndexOf('}');
+        let endIdx = text.lastIndexOf(']'); let objEndIdx = text.lastIndexOf('}');
         if (endIdx === -1 || (objEndIdx !== -1 && objEndIdx > endIdx)) endIdx = objEndIdx;
-
         if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
             let possibleJson = text.substring(startIdx, endIdx + 1);
-            possibleJson = possibleJson.replace(/\\par[ \d]*\n?/g, ''); 
-            possibleJson = possibleJson.replace(/\\[a-z0-9]+\s?/gi, ''); 
-            possibleJson = possibleJson.replace(/\\/g, ''); 
-            
+            possibleJson = possibleJson.replace(/\\par[ \d]*\n?/g, '').replace(/\\[a-z0-9]+\s?/gi, '').replace(/\\/g, ''); 
             try { return JSON.parse(possibleJson); } catch(e) {}
         }
         throw new Error("Ungültiges Format");
       };
 
-      // --- NEU: ZWISCHENABLAGE (SMART PASTE) LOGIK ---
       const importFromClipboard = async () => {
         try {
           const text = await navigator.clipboard.readText();
-          if (!text) {
-             showToast("Zwischenablage ist leer!");
-             return;
-          }
+          if (!text) { showToast("Zwischenablage ist leer!"); return; }
           const data = parseImportedFile(text);
           const list = Array.isArray(data) ? data : [data];
-          
           if (list.length > 0) {
               const shortcutCard = {
-                title: list[0].title || '', 
-                description: list[0].description || '',
-                initialValue: list[0].initialValue || '', 
-                codeValue: list[0].codeValue || '',
-                codeType: list[0].codeType || 'BARCODE', 
-                category: list[0].category || 'coupon',
-                expiryDate: list[0].expiryDate || '', 
-                pin: list[0].pin || '',
+                title: list[0].title || '', description: list[0].description || '',
+                initialValue: list[0].initialValue || '', codeValue: list[0].codeValue || '',
+                codeType: list[0].codeType || 'BARCODE', category: list[0].category || 'coupon',
+                expiryDate: list[0].expiryDate || '', pin: list[0].pin || '',
                 customOptions: list[0].customOptions || { canRedeem: true, canGift: true }
               };
-              setEditingCard(shortcutCard); 
-              setSelectedCategory(shortcutCard.category || 'custom');
-              setCurrentView('wallet');
-              setIsCreatorOpen(true);
+              setEditingCard(shortcutCard); setSelectedCategory(shortcutCard.category || 'custom');
+              setCurrentView('wallet'); setIsCreatorOpen(true);
           }
         } catch(err) {
-          console.error("Clipboard Error:", err);
-          alert("Kein gültiger Karten-Code in der Zwischenablage gefunden. Bitte kopiere das Ergebnis zuerst!");
+          alert("Kein gültiger Karten-Code in der Zwischenablage gefunden.");
         }
       };
 
       const importData = (event) => {
         const files = event.target.files;
         if (!files.length) return;
-        
         Array.from(files).forEach(file => {
           const reader = new FileReader();
           reader.onload = (e) => {
             try {
               const data = parseImportedFile(e.target.result);
               const list = Array.isArray(data) ? data : [data];
-              
-              const normalizedList = list.map(c => ({
-                 ...c,
-                 id: String(c.id || Date.now() + Math.random())
-              }));
-
+              const normalizedList = list.map(c => ({ ...c, id: String(c.id || Date.now() + Math.random()) }));
               setCards(prev => {
                 const existingIds = new Set(prev.map(c => String(c.id)));
                 const fresh = normalizedList.filter(c => !existingIds.has(c.id));
                 return [...prev, ...fresh];
               });
-
               showToast("Import erfolgreich");
-            } catch(err) {
-              alert("Fehler beim Lesen der Datei. Bitte stelle sicher, dass die Datei validen Text enthält.");
-            }
+            } catch(err) { alert("Fehler beim Lesen der Datei."); }
           };
           reader.readAsText(file);
         });
@@ -384,7 +505,7 @@
       const archivedCards = cards.filter(c => c.isGifted || c.isRedeemed);
       const presentCategories = [...new Set(activeCards.map(c => CATEGORIES[c.category] ? c.category : 'custom'))];
 
-      const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen;
+      const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen || giftModal.isOpen;
 
       return (
         <div className="w-full text-gray-900 dark:text-gray-100 transition-colors duration-300">
@@ -398,12 +519,9 @@
               </h1>
               {(currentView === 'wallet' || currentView === 'gifted') && (
                 <div className="flex space-x-2">
-                  
-                  {/* NEU: Smart Paste Button */}
                   <button onClick={importFromClipboard} className="p-2 bg-blue-50 dark:bg-blue-900/40 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/60 transition active:scale-90">
                     <Clipboard size={18} className="text-blue-600 dark:text-blue-400" />
                   </button>
-
                   <label className="cursor-pointer p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition active:scale-90">
                     <Upload size={18} className="text-gray-700 dark:text-gray-200" />
                     <input type="file" multiple accept=".nexwallet,.json,.txt,.rtf,*/*" className="hidden" onChange={importData} />
@@ -461,7 +579,7 @@
                       key={card.id} card={card} 
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
-                      onToggleGift={() => toggleGifted(card.id)}
+                      onToggleGift={() => setGiftModal({ isOpen: true, card: card })} // NEU
                       onEdit={() => openEditor(card)}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
@@ -483,7 +601,7 @@
                     <div key={card.id} className="opacity-75 grayscale hover:grayscale-0 transition-all duration-300">
                       <WalletCard 
                         card={card} 
-                        onToggleGift={() => toggleGifted(card.id)}
+                        onToggleGift={() => toggleGiftedRestore(card.id)} // Rename func for Archive
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
                         onEdit={() => openEditor(card)}
@@ -553,6 +671,32 @@
                   onCancel={() => { setIsCreatorOpen(false); setEditingCard(null); }}
                   onDelete={editingCard && editingCard.id ? () => { setCards(cards.filter(c => c.id !== editingCard.id)); setIsCreatorOpen(false); setEditingCard(null); } : null}
                 />
+              </div>
+            </div>
+          )}
+
+          {/* DAS NEUE VERSCHENKEN (GIFT) MODAL */}
+          {giftModal.isOpen && giftModal.card && (
+            <div className="fixed inset-0 z-[150] flex items-end justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => !isGeneratingPdf && setGiftModal({isOpen: false, card: null})}>
+              <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-[2rem] p-6 shadow-2xl mb-4 slide-in-from-bottom-8" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6">
+                  <h3 className="text-xl font-bold dark:text-white">Karte verschenken</h3>
+                  <button onClick={() => !isGeneratingPdf && setGiftModal({isOpen: false, card: null})} className="p-2 bg-gray-100 dark:bg-gray-700 rounded-full active:scale-90 transition"><X size={20} className="dark:text-white" /></button>
+                </div>
+                
+                <div className="space-y-3">
+                  <button disabled={isGeneratingPdf} onClick={() => handleSharePDF(giftModal.card)} className="w-full flex items-center justify-center gap-3 bg-blue-600 text-white p-4 rounded-2xl font-bold active:scale-95 transition-transform shadow-lg disabled:opacity-70">
+                     <FileText size={20} /> {isGeneratingPdf ? 'PDF wird erstellt...' : 'Als schicke PDF teilen'}
+                  </button>
+                  <button disabled={isGeneratingPdf} onClick={() => handleShareNexWallet(giftModal.card)} className="w-full flex items-center justify-center gap-3 bg-gray-100 dark:bg-gray-700 dark:text-white p-4 rounded-2xl font-bold active:scale-95 transition-transform">
+                     <Share size={20} /> Als App-Datei senden (.nexwallet)
+                  </button>
+                  <div className="h-px bg-gray-200 dark:bg-gray-700 my-4"></div>
+                  <button disabled={isGeneratingPdf} onClick={() => handleArchiveOnly(giftModal.card.id)} className="w-full flex items-center justify-center gap-3 bg-transparent text-gray-500 dark:text-gray-400 p-2 rounded-2xl font-bold active:scale-95 transition-transform">
+                     <Archive size={18} /> Nur im Archiv ablegen
+                  </button>
+                </div>
+                <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6 leading-relaxed">Nach dem erfolgreichen Teilen wird die Karte automatisch in dein Archiv verschoben.</p>
               </div>
             </div>
           )}
