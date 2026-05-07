@@ -373,19 +373,16 @@
         let topExtraHTML = '';
         let bottomItems = [];
 
-        // Immer maximal 2 Elemente unten, Überschuss wandert nach oben!
-        if (hasValue) {
-            bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>`);
-        }
-
-        if (hasValue && hasDate && hasPin) {
-            // Wenn alle 3 Dinge da sind, wandert das Datum nach oben ins farbige Feld
+        // NEU: Wenn Wert, Datum und Pin da sind (oder Gutschein+Datum+Pin), rutscht das Datum in den farbigen Header!
+        if ((isCoupon && hasDate && hasPin) || (hasValue && hasDate && hasPin)) {
             topExtraHTML = `<div style="margin-top: 30px;"><p style="margin:0; font-size: 14px; color: rgba(255,255,255,0.8); font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 5px 0 0 0; font-size: 26px; font-weight: 800; color: white;">${formatExp}</p></div>`;
-            bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
+            if (hasValue) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #9ca3af; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>`);
+            if (hasPin) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #9ca3af; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
         } else {
             // Normale, saubere Darstellung
-            if (hasDate) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 800; color: #111827;">${formatExp}</p></div>`);
-            if (hasPin) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
+            if (hasValue) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #9ca3af; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>`);
+            if (hasDate) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #9ca3af; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 800; color: #111827;">${formatExp}</p></div>`);
+            if (hasPin) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #9ca3af; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
         }
 
         const getGradient = (colorCode) => {
@@ -401,15 +398,15 @@
 
         const bgGradient = getGradient(card.colorCode);
 
-        // FIX 2 & 3: Flexibles Flexbox Design für die perfekte Perforation!
+        // FIX 2 & 3: Flexibles Flexbox Design für die perfekte Perforation und weiße Box!
         container.innerHTML = `
           <div style="width: 595px; height: 842px; background-color: #f3f4f6; display: flex; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px; box-sizing: border-box;">
-             <div style="width: 100%; height: 100%; background: ${bgGradient}; border-radius: 30px; display: flex; flex-direction: column; color: white; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden;">
+             <div style="width: 100%; height: 100%; background: ${bgGradient}; border-radius: 30px; display: flex; flex-direction: column; color: white; box-shadow: 0 20px 40px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
                 
-                <!-- Oberer farbiger Bereich (nimmt übrigen Platz ein) -->
-                <div style="flex: 1; padding: 40px; display: flex; flex-direction: column;">
+                <!-- Oberer farbiger Bereich (nimmt übrigen Platz flexibel ein) -->
+                <div style="flex: 1; padding: 50px 40px 30px 40px; display: flex; flex-direction: column;">
                     <div style="font-size: 16px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; opacity: 0.8; margin-bottom: 10px;">
-                      ${isTkt ? 'TICKET' : 'Geschenkgutschein'}
+                      ${isTkt ? 'TICKET' : 'GESCHENKGUTSCHEIN'}
                     </div>
                     <h1 style="font-size: 56px; font-weight: 900; margin: 0; line-height: 1.1; letter-spacing: -1px;">${card.title}</h1>
                     <p style="font-size: 22px; opacity: 0.9; margin-top: 15px; font-weight: 500;">${card.description}</p>
@@ -417,21 +414,25 @@
                 </div>
 
                 <!-- Perforation - Immer EXAKT auf der Trennlinie -->
-                <div style="width: 100%; height: 40px; display: flex; align-items: center; justify-content: space-between;">
-                    <div style="width: 20px; height: 40px; background: #f3f4f6; border-radius: 0 40px 40px 0;"></div>
-                    <div style="flex: 1; border-top: 3px dashed rgba(255,255,255,0.4); margin: 0 10px;"></div>
-                    <div style="width: 20px; height: 40px; background: #f3f4f6; border-radius: 40px 0 0 40px;"></div>
+                <div style="position: relative; width: 100%; height: 2px; display: flex; align-items: center; margin-bottom: 30px;">
+                    <div style="position: absolute; left: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%; z-index: 10;"></div>
+                    <div style="flex: 1; border-top: 3px dashed rgba(255,255,255,0.4); margin: 0 25px;"></div>
+                    <div style="position: absolute; right: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%; z-index: 10;"></div>
                 </div>
 
-                <!-- Unterer weißer Bereich (Passt sich dem Inhalt an) -->
-                <div style="background: white; border-radius: 0 0 30px 30px; padding: 30px 40px 40px 40px; display: flex; flex-direction: column; align-items: center; color: #111827;">
-                   <div style="display: flex; justify-content: space-around; width: 100%; margin-bottom: 30px; text-align: center;">
-                      ${bottomItems.join('')}
-                   </div>
+                <!-- Unteres weißes Feld (Das "Ticket"-Feld im Inneren) -->
+                <div style="padding: 0 40px 40px 40px;">
+                    <div style="background: white; border-radius: 24px; padding: 40px 20px; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; color: #111827; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+                       
+                       <div style="display: flex; justify-content: space-around; width: 100%; margin-bottom: 30px; text-align: center;">
+                          ${bottomItems.join('')}
+                       </div>
 
-                   <div id="pdf-code" style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 120px;"></div>
-                   
-                   <p style="margin: 15px 0 0 0; font-size: 16px; font-family: monospace; letter-spacing: 4px; font-weight: bold; color: #111827;">${card.codeValue}</p>
+                       <!-- Code Feld -->
+                       <div id="pdf-code" style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 120px;"></div>
+                       
+                       <p style="margin: 15px 0 0 0; font-size: 16px; font-family: monospace; letter-spacing: 4px; font-weight: bold; color: #111827;">${card.codeValue}</p>
+                    </div>
                 </div>
 
              </div>
@@ -465,7 +466,6 @@
               jsPDF: { unit: 'px', format: [595, 842], orientation: 'portrait' }
             };
 
-            // html2pdf nutzt jetzt unseren Container (innerhalb des versteckten Wrappers)
             const pdfBlob = await window.html2pdf().set(opt).from(container).outputPdf('blob');
             const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
             
