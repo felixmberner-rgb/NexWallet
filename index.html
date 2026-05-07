@@ -341,25 +341,53 @@
         setGiftModal({ isOpen: false, card: null });
       };
 
-      // --- DER NEUE, PERFEKTIONIERTE PDF GENERATOR ---
+      // --- DER ÜBERARBEITETE, PERFEKTE PDF GENERATOR ---
       const handleSharePDF = async (card) => {
         setIsGeneratingPdf(true);
         showToast("PDF wird erstellt...");
 
+        // FIX 1: Der Wrapper verhindert jegliche Layout-Zerstörung
+        // Wir packen den HTML-Code in einen winzigen (1x1) versteckten Tresor,
+        // sodass das iPhone-Layout zu 100% geschützt bleibt!
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'absolute';
+        wrapper.style.top = '0';
+        wrapper.style.left = '0';
+        wrapper.style.width = '1px';
+        wrapper.style.height = '1px';
+        wrapper.style.overflow = 'hidden';
+        wrapper.style.zIndex = '-1000';
+
         const container = document.createElement('div');
-        // FIX für iPhone weißen Bildschirm: Position FIXED aber weit im Hintergrund (z-index)
-        // iOS Safari rendert das Element dann vollständig ohne es wegzuschneiden!
-        container.style.position = 'fixed';
-        container.style.top = '0';
-        container.style.left = '0';
-        container.style.zIndex = '-1000'; 
         
         const formatVal = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(card.currentValue || 0);
         const formatExp = card.expiryDate ? new Date(card.expiryDate).toLocaleDateString('de-DE') : '';
         const isTkt = card.category === 'ticket';
-        const showValue = card.initialValue > 0 || card.category === 'coupon';
+        const isCoupon = card.category === 'coupon';
+        
+        // Logik für die intelligente Aufteilung
+        const hasValue = card.initialValue > 0 || isCoupon;
+        const hasDate = !!formatExp;
+        const hasPin = !!card.pin;
+        
+        let topExtraHTML = '';
+        let bottomItems = [];
 
-        // Mappt den Tailwind-Farbnamen auf echte CSS-Farbverläufe für die PDF
+        // Immer maximal 2 Elemente unten, Überschuss wandert nach oben!
+        if (hasValue) {
+            bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>`);
+        }
+
+        if (hasValue && hasDate && hasPin) {
+            // Wenn alle 3 Dinge da sind, wandert das Datum nach oben ins farbige Feld
+            topExtraHTML = `<div style="margin-top: 30px;"><p style="margin:0; font-size: 14px; color: rgba(255,255,255,0.8); font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 5px 0 0 0; font-size: 26px; font-weight: 800; color: white;">${formatExp}</p></div>`;
+            bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
+        } else {
+            // Normale, saubere Darstellung
+            if (hasDate) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 800; color: #111827;">${formatExp}</p></div>`);
+            if (hasPin) bottomItems.push(`<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>`);
+        }
+
         const getGradient = (colorCode) => {
           if (!colorCode) return 'linear-gradient(135deg, #374151, #111827)';
           if (colorCode.includes('blue')) return 'linear-gradient(135deg, #3b82f6, #4f46e5)';
@@ -373,40 +401,45 @@
 
         const bgGradient = getGradient(card.colorCode);
 
-        // Atemberaubendes, hochmodernes PDF Design im Hochformat (Portrait)
+        // FIX 2 & 3: Flexibles Flexbox Design für die perfekte Perforation!
         container.innerHTML = `
           <div style="width: 595px; height: 842px; background-color: #f3f4f6; display: flex; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px; box-sizing: border-box;">
-             <div style="width: 100%; height: 100%; background: ${bgGradient}; border-radius: 30px; padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; color: white; box-shadow: 0 20px 40px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
+             <div style="width: 100%; height: 100%; background: ${bgGradient}; border-radius: 30px; display: flex; flex-direction: column; color: white; box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden;">
                 
-                <!-- Deko-Elemente (Abreißkante / Perforation) -->
-                <div style="position: absolute; top: 55%; left: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%;"></div>
-                <div style="position: absolute; top: 55%; right: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%;"></div>
-                <div style="position: absolute; top: 55%; left: 20px; right: 20px; height: 2px; border-top: 2px dashed rgba(255,255,255,0.4); margin-top: 19px;"></div>
-
-                <div style="z-index: 10;">
+                <!-- Oberer farbiger Bereich (nimmt übrigen Platz ein) -->
+                <div style="flex: 1; padding: 40px; display: flex; flex-direction: column;">
                     <div style="font-size: 16px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; opacity: 0.8; margin-bottom: 10px;">
-                      ${isTkt ? 'Premium Ticket' : 'Geschenkgutschein'}
+                      ${isTkt ? 'TICKET' : 'Geschenkgutschein'}
                     </div>
                     <h1 style="font-size: 56px; font-weight: 900; margin: 0; line-height: 1.1; letter-spacing: -1px;">${card.title}</h1>
                     <p style="font-size: 22px; opacity: 0.9; margin-top: 15px; font-weight: 500;">${card.description}</p>
+                    ${topExtraHTML}
                 </div>
 
-                <div style="z-index: 10; margin-top: auto; display: flex; flex-direction: column; align-items: center; background: white; border-radius: 20px; padding: 30px 20px; color: #111827; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                <!-- Perforation - Immer EXAKT auf der Trennlinie -->
+                <div style="width: 100%; height: 40px; display: flex; align-items: center; justify-content: space-between;">
+                    <div style="width: 20px; height: 40px; background: #f3f4f6; border-radius: 0 40px 40px 0;"></div>
+                    <div style="flex: 1; border-top: 3px dashed rgba(255,255,255,0.4); margin: 0 10px;"></div>
+                    <div style="width: 20px; height: 40px; background: #f3f4f6; border-radius: 40px 0 0 40px;"></div>
+                </div>
+
+                <!-- Unterer weißer Bereich (Passt sich dem Inhalt an) -->
+                <div style="background: white; border-radius: 0 0 30px 30px; padding: 30px 40px 40px 40px; display: flex; flex-direction: column; align-items: center; color: #111827;">
                    <div style="display: flex; justify-content: space-around; width: 100%; margin-bottom: 30px; text-align: center;">
-                      ${showValue ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>` : ''}
-                      ${formatExp ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 800; color: #111827;">${formatExp}</p></div>` : ''}
-                      ${card.pin ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>` : ''}
+                      ${bottomItems.join('')}
                    </div>
 
-                   <!-- Dieser Kasten hält den Barcode scharf und isoliert -->
                    <div id="pdf-code" style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 120px;"></div>
                    
                    <p style="margin: 15px 0 0 0; font-size: 16px; font-family: monospace; letter-spacing: 4px; font-weight: bold; color: #111827;">${card.codeValue}</p>
                 </div>
+
              </div>
           </div>
         `;
-        document.body.appendChild(container);
+        
+        wrapper.appendChild(container);
+        document.body.appendChild(wrapper);
 
         const codeContainer = container.querySelector('#pdf-code');
         try {
@@ -421,7 +454,6 @@
             }
         } catch (e) { console.error(e); }
 
-        // Kurzer Wartemoment, damit der Browser den Barcode sauber in das unsichtbare Div laden kann
         await new Promise(r => setTimeout(r, 400));
 
         try {
@@ -430,12 +462,11 @@
               filename: `${card.title.replace(/\s+/g, '_')}.pdf`,
               image: { type: 'jpeg', quality: 1 },
               html2canvas: { scale: 2, useCORS: true, backgroundColor: '#f3f4f6' },
-              // Hochformat: Portrait, Maße exakt auf den Container gemünzt
               jsPDF: { unit: 'px', format: [595, 842], orientation: 'portrait' }
             };
 
-            // Wichtig: Wir zielen direkt auf das generierte Child (firstElementChild)
-            const pdfBlob = await window.html2pdf().set(opt).from(container.firstElementChild).outputPdf('blob');
+            // html2pdf nutzt jetzt unseren Container (innerhalb des versteckten Wrappers)
+            const pdfBlob = await window.html2pdf().set(opt).from(container).outputPdf('blob');
             const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
             
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -455,7 +486,7 @@
         } catch (e) {
             if (e.name !== 'AbortError') { alert("Fehler beim Erstellen der PDF."); }
         } finally {
-            document.body.removeChild(container);
+            document.body.removeChild(wrapper);
             setIsGeneratingPdf(false);
             setGiftModal({ isOpen: false, card: null });
         }
