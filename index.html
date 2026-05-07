@@ -144,7 +144,6 @@
     } from 'lucide-react';
 
     // WICHTIG: Erhöhe diese Nummer bei JEDEM neuen Update auf GitHub Pages!
-    // z.B. auf "1.0.1", "1.0.2" etc. Das löst bei allen iPhones das Update aus.
     const APP_VERSION = "1.0.0"; 
 
     const CATEGORIES = {
@@ -183,7 +182,6 @@
       const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
       const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
       
-      // NEU: Update State
       const [updateAvailable, setUpdateAvailable] = useState(false);
 
       useEffect(() => {
@@ -198,21 +196,14 @@
         }
       }, [cards, activeCategoryTab]);
 
-      // --- DER OVER-THE-AIR UPDATE CHECKER ---
       useEffect(() => {
         const checkForUpdates = async () => {
           try {
             const urlHref = window.location.href;
-            
-            // Nur prüfen, wenn die App über echtes HTTP/HTTPS aufgerufen wird (verhindert Fehler in der Vorschau/lokal)
             if (!urlHref.startsWith('http')) return;
-            
             const url = urlHref.split('?')[0];
-            // Cache-Busting durch Timestamp, damit er wirklich die Live-Datei von GitHub zieht
             const res = await fetch(url + '?nocache=' + new Date().getTime(), { cache: 'no-store' });
             const text = await res.text();
-            
-            // Sucht nach der APP_VERSION Konstante im Code
             const match = text.match(/const APP_VERSION = ['"]([^'"]+)['"]/);
             if (match && match[1] && match[1] !== APP_VERSION) {
               setUpdateAvailable(true);
@@ -221,12 +212,9 @@
             console.log("Update check fehlgeschlagen (evtl. Offline)");
           }
         };
-
-        // Kurz warten, damit die App erst in Ruhe starten kann
         setTimeout(checkForUpdates, 1500);
       }, []);
 
-      // --- DER BULLETPROOF URL PARSER ---
       const checkUrlForCreate = () => {
         const urlHref = window.location.href;
         if (urlHref.includes('action=create')) {
@@ -236,7 +224,6 @@
                const match = urlHref.match(regex);
                return match ? decodeURIComponent(match[1]) : '';
             };
-            
             const shortcutCard = {
               title: getParam('title'), description: getParam('desc'),
               initialValue: getParam('val'), codeValue: getParam('code'),
@@ -244,15 +231,12 @@
               expiryDate: getParam('expiry'), pin: getParam('pin'),
               customOptions: { canRedeem: true, canGift: true }
             };
-            
             setEditingCard(shortcutCard); 
             setSelectedCategory(shortcutCard.category || 'custom');
             setCurrentView('wallet');
             setTimeout(() => setIsCreatorOpen(true), 100);
             try { window.history.replaceState({}, document.title, urlHref.split('?')[0]); } catch(err) {}
-          } catch(e) {
-            console.error("URL Parse Error:", e);
-          }
+          } catch(e) {}
         }
       };
 
@@ -273,24 +257,14 @@
           navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
         }
 
-        const handleFocusIn = (e) => {
-            if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) setIsKeyboardOpen(true);
-        };
+        const handleFocusIn = (e) => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) setIsKeyboardOpen(true); };
         const handleFocusOut = (e) => {
             if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
-                setTimeout(() => {
-                    if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) {
-                        setIsKeyboardOpen(false);
-                    }
-                }, 20);
+                setTimeout(() => { if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) setIsKeyboardOpen(false); }, 20);
             }
         };
 
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible') {
-                checkUrlForCreate();
-            }
-        };
+        const handleVisibilityChange = () => { if (document.visibilityState === 'visible') checkUrlForCreate(); };
 
         document.addEventListener('focusin', handleFocusIn);
         document.addEventListener('focusout', handleFocusOut);
@@ -310,18 +284,13 @@
       };
 
       const handleUpdateNow = () => {
-        // Zerstört aggressiv alle Service Worker und Caches
         if ('serviceWorker' in navigator) {
            navigator.serviceWorker.getRegistrations().then(function(registrations) {
-               for(let registration of registrations) {
-                   registration.unregister();
-               }
+               for(let registration of registrations) registration.unregister();
            });
         }
         if ('caches' in window) {
-           caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
-               window.location.reload(true);
-           });
+           caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => window.location.reload(true));
         } else {
            window.location.reload(true);
         }
@@ -330,7 +299,6 @@
       const handlePartialRedeem = () => {
         const amount = parseFloat(redeemAmount.replace(',', '.'));
         if (isNaN(amount) || amount <= 0) return;
-
         setCards(cards.map(card => {
           if (card.id === redeemModal.cardId) {
             const newValue = Math.max(0, card.currentValue - amount);
@@ -361,61 +329,79 @@
         const jsonStr = JSON.stringify([card]);
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const file = new File([blob], `${card.title.replace(/[^a-z0-9]/gi, '_')}.nexwallet`, { type: 'application/json' });
-        
         try {
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                await navigator.share({
-                    files: [file],
-                    title: card.title,
-                    text: 'Hier ist deine Karte für NexWallet!'
-                });
+                await navigator.share({ files: [file], title: card.title, text: 'Hier ist deine Karte für NexWallet!' });
                 doArchiveCard(card.id);
             } else {
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(blob);
-                link.download = file.name;
-                link.click();
+                const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = file.name; link.click();
                 doArchiveCard(card.id);
             }
-        } catch (e) {
-            if (e.name !== 'AbortError') console.error(e);
-        }
+        } catch (e) { if (e.name !== 'AbortError') console.error(e); }
         setGiftModal({ isOpen: false, card: null });
       };
 
+      // --- DER NEUE, PERFEKTIONIERTE PDF GENERATOR ---
       const handleSharePDF = async (card) => {
         setIsGeneratingPdf(true);
         showToast("PDF wird erstellt...");
 
         const container = document.createElement('div');
-        container.style.position = 'absolute';
-        container.style.left = '-9999px';
+        // FIX für iPhone weißen Bildschirm: Position FIXED aber weit im Hintergrund (z-index)
+        // iOS Safari rendert das Element dann vollständig ohne es wegzuschneiden!
+        container.style.position = 'fixed';
         container.style.top = '0';
+        container.style.left = '0';
+        container.style.zIndex = '-1000'; 
         
         const formatVal = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(card.currentValue || 0);
         const formatExp = card.expiryDate ? new Date(card.expiryDate).toLocaleDateString('de-DE') : '';
         const isTkt = card.category === 'ticket';
+        const showValue = card.initialValue > 0 || card.category === 'coupon';
 
+        // Mappt den Tailwind-Farbnamen auf echte CSS-Farbverläufe für die PDF
+        const getGradient = (colorCode) => {
+          if (!colorCode) return 'linear-gradient(135deg, #374151, #111827)';
+          if (colorCode.includes('blue')) return 'linear-gradient(135deg, #3b82f6, #4f46e5)';
+          if (colorCode.includes('orange') && colorCode.includes('red')) return 'linear-gradient(135deg, #fb923c, #ef4444)';
+          if (colorCode.includes('emerald')) return 'linear-gradient(135deg, #34d399, #14b8a6)';
+          if (colorCode.includes('pink')) return 'linear-gradient(135deg, #ec4899, #e11d48)';
+          if (colorCode.includes('gray')) return 'linear-gradient(135deg, #374151, #111827)';
+          if (colorCode.includes('yellow')) return 'linear-gradient(135deg, #facc15, #f97316)';
+          return 'linear-gradient(135deg, #3b82f6, #4f46e5)';
+        };
+
+        const bgGradient = getGradient(card.colorCode);
+
+        // Atemberaubendes, hochmodernes PDF Design im Hochformat (Portrait)
         container.innerHTML = `
-          <div style="width: 842px; height: 595px; background: #f8fafc; padding: 40px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-family: -apple-system, sans-serif;">
-             <div style="width: 100%; height: 100%; background: white; border: 3px dashed #cbd5e1; border-radius: 30px; padding: 50px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
-                <div style="position: absolute; top: 30px; right: 40px; color: #f1f5f9; font-size: 80px; font-weight: 900; text-transform: uppercase; letter-spacing: 5px; z-index: 0;">${isTkt ? 'TICKET' : 'GUTSCHEIN'}</div>
+          <div style="width: 595px; height: 842px; background-color: #f3f4f6; display: flex; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 30px; box-sizing: border-box;">
+             <div style="width: 100%; height: 100%; background: ${bgGradient}; border-radius: 30px; padding: 40px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; color: white; box-shadow: 0 20px 40px rgba(0,0,0,0.1); position: relative; overflow: hidden;">
                 
-                <div style="z-index: 1;">
-                    <h1 style="margin: 0; font-size: 52px; color: #111827; max-width: 500px; line-height: 1.1;">${card.title}</h1>
-                    <p style="margin: 15px 0 0 0; font-size: 24px; color: #6b7280; font-weight: 500;">${card.description}</p>
-                </div>
-                
-                <div style="display: flex; justify-content: space-between; align-items: flex-end; z-index: 1; border-top: 2px solid #f1f5f9; padding-top: 30px; margin-top: auto;">
-                    <div>
-                        ${(card.initialValue > 0 || card.category === 'coupon') ? `<div style="margin-bottom: 20px;"><span style="font-size: 16px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 2px;">WERT</span><br><span style="font-size: 48px; font-weight: 900; color: #2563eb;">${formatVal}</span></div>` : ''}
-                        
-                        <div style="display: flex; gap: 40px;">
-                          ${formatExp ? `<div><span style="font-size: 14px; color: #9ca3af; text-transform: uppercase; font-weight: 700;">GÜLTIG BIS</span><br><span style="font-size: 22px; color: #111827; font-weight: 600;">${formatExp}</span></div>` : ''}
-                          ${card.pin ? `<div><span style="font-size: 14px; color: #9ca3af; text-transform: uppercase; font-weight: 700;">PIN / INFO</span><br><span style="font-size: 22px; color: #111827; font-weight: 600; font-family: monospace;">${card.pin}</span></div>` : ''}
-                        </div>
+                <!-- Deko-Elemente (Abreißkante / Perforation) -->
+                <div style="position: absolute; top: 55%; left: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%;"></div>
+                <div style="position: absolute; top: 55%; right: -20px; width: 40px; height: 40px; background: #f3f4f6; border-radius: 50%;"></div>
+                <div style="position: absolute; top: 55%; left: 20px; right: 20px; height: 2px; border-top: 2px dashed rgba(255,255,255,0.4); margin-top: 19px;"></div>
+
+                <div style="z-index: 10;">
+                    <div style="font-size: 16px; font-weight: 800; letter-spacing: 4px; text-transform: uppercase; opacity: 0.8; margin-bottom: 10px;">
+                      ${isTkt ? 'Premium Ticket' : 'Geschenkgutschein'}
                     </div>
-                    <div id="pdf-code" style="background: white; padding: 15px; border-radius: 16px; border: 1px solid #e2e8f0; display: inline-block;"></div>
+                    <h1 style="font-size: 56px; font-weight: 900; margin: 0; line-height: 1.1; letter-spacing: -1px;">${card.title}</h1>
+                    <p style="font-size: 22px; opacity: 0.9; margin-top: 15px; font-weight: 500;">${card.description}</p>
+                </div>
+
+                <div style="z-index: 10; margin-top: auto; display: flex; flex-direction: column; align-items: center; background: white; border-radius: 20px; padding: 30px 20px; color: #111827; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
+                   <div style="display: flex; justify-content: space-around; width: 100%; margin-bottom: 30px; text-align: center;">
+                      ${showValue ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Wert</p><p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 900; color: #111827;">${formatVal}</p></div>` : ''}
+                      ${formatExp ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">${isTkt ? 'Datum' : 'Gültig bis'}</p><p style="margin: 8px 0 0 0; font-size: 22px; font-weight: 800; color: #111827;">${formatExp}</p></div>` : ''}
+                      ${card.pin ? `<div><p style="margin:0; font-size: 11px; color: #6b7280; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">PIN / Passwort</p><p style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800; color: #111827; font-family: monospace;">${card.pin}</p></div>` : ''}
+                   </div>
+
+                   <!-- Dieser Kasten hält den Barcode scharf und isoliert -->
+                   <div id="pdf-code" style="display: flex; justify-content: center; align-items: center; width: 100%; min-height: 120px;"></div>
+                   
+                   <p style="margin: 15px 0 0 0; font-size: 16px; font-family: monospace; letter-spacing: 4px; font-weight: bold; color: #111827;">${card.codeValue}</p>
                 </div>
              </div>
           </div>
@@ -423,26 +409,33 @@
         document.body.appendChild(container);
 
         const codeContainer = container.querySelector('#pdf-code');
-        if (card.codeType === 'QR') {
-            const canvas = document.createElement('canvas');
-            codeContainer.appendChild(canvas);
-            await new Promise(res => window.QRCode.toCanvas(canvas, card.codeValue, { width: 140, margin: 0 }, res));
-        } else {
-            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-            codeContainer.appendChild(svg);
-            window.JsBarcode(svg, card.codeValue, { format: "CODE128", displayValue: true, margin: 0, height: 70, fontSize: 18, width: 2.5 });
-        }
+        try {
+            if (card.codeType === 'QR') {
+                const canvas = document.createElement('canvas');
+                codeContainer.appendChild(canvas);
+                await new Promise(res => window.QRCode.toCanvas(canvas, card.codeValue, { width: 180, margin: 0 }, res));
+            } else {
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                codeContainer.appendChild(svg);
+                window.JsBarcode(svg, card.codeValue, { format: "CODE128", displayValue: false, margin: 0, height: 90, width: 3, lineColor: "#111827" });
+            }
+        } catch (e) { console.error(e); }
+
+        // Kurzer Wartemoment, damit der Browser den Barcode sauber in das unsichtbare Div laden kann
+        await new Promise(r => setTimeout(r, 400));
 
         try {
             const opt = {
               margin: 0,
               filename: `${card.title.replace(/\s+/g, '_')}.pdf`,
               image: { type: 'jpeg', quality: 1 },
-              html2canvas: { scale: 2, useCORS: true },
-              jsPDF: { unit: 'px', format: [842, 595], orientation: 'landscape' }
+              html2canvas: { scale: 2, useCORS: true, backgroundColor: '#f3f4f6' },
+              // Hochformat: Portrait, Maße exakt auf den Container gemünzt
+              jsPDF: { unit: 'px', format: [595, 842], orientation: 'portrait' }
             };
 
-            const pdfBlob = await window.html2pdf().set(opt).from(container).outputPdf('blob');
+            // Wichtig: Wir zielen direkt auf das generierte Child (firstElementChild)
+            const pdfBlob = await window.html2pdf().set(opt).from(container.firstElementChild).outputPdf('blob');
             const file = new File([pdfBlob], opt.filename, { type: 'application/pdf' });
             
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -460,10 +453,7 @@
                 doArchiveCard(card.id);
             }
         } catch (e) {
-            if (e.name !== 'AbortError') {
-              console.error("PDF Export error:", e);
-              alert("Fehler beim Erstellen der PDF.");
-            }
+            if (e.name !== 'AbortError') { alert("Fehler beim Erstellen der PDF."); }
         } finally {
             document.body.removeChild(container);
             setIsGeneratingPdf(false);
@@ -560,7 +550,6 @@
       return (
         <div className="w-full text-gray-900 dark:text-gray-100 transition-colors duration-300 relative">
           
-          {/* DAS UPDATE BANNER */}
           {updateAvailable && (
             <div className="fixed top-0 left-0 right-0 bg-blue-600 text-white pt-10 pb-4 px-6 z-[200] flex justify-between items-center shadow-xl animate-in slide-in-from-top-full">
               <div>
