@@ -140,8 +140,12 @@
       PlusCircle, Wallet, Archive, Upload, Download, X, Check,
       MinusCircle, CreditCard, RefreshCcw, Image as ImageIcon,
       Edit2, Trash2, Ticket, Tag, Star, Shapes, CopyPlus, CheckSquare, Square, Lock, Clipboard,
-      FileText, Share
+      FileText, Share, ArrowRightCircle
     } from 'lucide-react';
+
+    // WICHTIG: Erhöhe diese Nummer bei JEDEM neuen Update auf GitHub Pages!
+    // z.B. auf "1.0.1", "1.0.2" etc. Das löst bei allen iPhones das Update aus.
+    const APP_VERSION = "1.0.0"; 
 
     const CATEGORIES = {
       coupon: { id: 'coupon', label: 'Gutschein', icon: Tag, color: 'text-orange-500', bg: 'bg-orange-100' },
@@ -172,12 +176,15 @@
       const [selectedCategory, setSelectedCategory] = useState('custom');
 
       const [redeemModal, setRedeemModal] = useState({ isOpen: false, cardId: null });
-      const [giftModal, setGiftModal] = useState({ isOpen: false, card: null }); // NEU: Gift Modal State
+      const [giftModal, setGiftModal] = useState({ isOpen: false, card: null }); 
       const [redeemAmount, setRedeemAmount] = useState('');
       const [fullscreenCode, setFullscreenCode] = useState(null);
       const [toast, setToast] = useState(null);
       const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
       const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+      
+      // NEU: Update State
+      const [updateAvailable, setUpdateAvailable] = useState(false);
 
       useEffect(() => {
         localStorage.setItem('nex_cards', JSON.stringify(cards));
@@ -191,6 +198,35 @@
         }
       }, [cards, activeCategoryTab]);
 
+      // --- DER OVER-THE-AIR UPDATE CHECKER ---
+      useEffect(() => {
+        const checkForUpdates = async () => {
+          try {
+            const urlHref = window.location.href;
+            
+            // Nur prüfen, wenn die App über echtes HTTP/HTTPS aufgerufen wird (verhindert Fehler in der Vorschau/lokal)
+            if (!urlHref.startsWith('http')) return;
+            
+            const url = urlHref.split('?')[0];
+            // Cache-Busting durch Timestamp, damit er wirklich die Live-Datei von GitHub zieht
+            const res = await fetch(url + '?nocache=' + new Date().getTime(), { cache: 'no-store' });
+            const text = await res.text();
+            
+            // Sucht nach der APP_VERSION Konstante im Code
+            const match = text.match(/const APP_VERSION = ['"]([^'"]+)['"]/);
+            if (match && match[1] && match[1] !== APP_VERSION) {
+              setUpdateAvailable(true);
+            }
+          } catch (e) {
+            console.log("Update check fehlgeschlagen (evtl. Offline)");
+          }
+        };
+
+        // Kurz warten, damit die App erst in Ruhe starten kann
+        setTimeout(checkForUpdates, 1500);
+      }, []);
+
+      // --- DER BULLETPROOF URL PARSER ---
       const checkUrlForCreate = () => {
         const urlHref = window.location.href;
         if (urlHref.includes('action=create')) {
@@ -232,7 +268,7 @@
         });
 
         if ('serviceWorker' in navigator) {
-          const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(caches.match(e.request).then(res => res || fetch(e.request))); });`;
+          const swCode = `self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); });`;
           const blob = new Blob([swCode], {type: 'application/javascript'});
           navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
         }
@@ -273,6 +309,24 @@
         setTimeout(() => setToast(null), 3000);
       };
 
+      const handleUpdateNow = () => {
+        // Zerstört aggressiv alle Service Worker und Caches
+        if ('serviceWorker' in navigator) {
+           navigator.serviceWorker.getRegistrations().then(function(registrations) {
+               for(let registration of registrations) {
+                   registration.unregister();
+               }
+           });
+        }
+        if ('caches' in window) {
+           caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k)))).then(() => {
+               window.location.reload(true);
+           });
+        } else {
+           window.location.reload(true);
+        }
+      };
+
       const handlePartialRedeem = () => {
         const amount = parseFloat(redeemAmount.replace(',', '.'));
         if (isNaN(amount) || amount <= 0) return;
@@ -293,8 +347,6 @@
         showToast("Eingelöst und archiviert");
       };
 
-      // --- NEU: DIE LOGIK FÜR DAS VERSCHENKEN MENÜ ---
-      
       const doArchiveCard = (id) => {
         setCards(prev => prev.map(card => card.id === id ? { ...card, isGifted: true } : card));
       };
@@ -335,13 +387,11 @@
         setIsGeneratingPdf(true);
         showToast("PDF wird erstellt...");
 
-        // Unsichtbaren Container für das PDF Design bauen
         const container = document.createElement('div');
         container.style.position = 'absolute';
         container.style.left = '-9999px';
         container.style.top = '0';
         
-        // Das wunderschöne Design der Karte (Din A5 Format quer)
         const formatVal = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(card.currentValue || 0);
         const formatExp = card.expiryDate ? new Date(card.expiryDate).toLocaleDateString('de-DE') : '';
         const isTkt = card.category === 'ticket';
@@ -508,7 +558,20 @@
       const hideNav = isKeyboardOpen || fullscreenCode !== null || isCreatorOpen || redeemModal.isOpen || giftModal.isOpen;
 
       return (
-        <div className="w-full text-gray-900 dark:text-gray-100 transition-colors duration-300">
+        <div className="w-full text-gray-900 dark:text-gray-100 transition-colors duration-300 relative">
+          
+          {/* DAS UPDATE BANNER */}
+          {updateAvailable && (
+            <div className="fixed top-0 left-0 right-0 bg-blue-600 text-white pt-10 pb-4 px-6 z-[200] flex justify-between items-center shadow-xl animate-in slide-in-from-top-full">
+              <div>
+                <p className="font-bold">Update verfügbar!</p>
+                <p className="text-xs text-blue-100">Neue Funktionen sind bereit.</p>
+              </div>
+              <button onClick={handleUpdateNow} className="bg-white text-blue-600 px-4 py-2 rounded-full font-bold text-sm shadow-md active:scale-95 transition flex items-center gap-2">
+                <ArrowRightCircle size={16} /> Aktualisieren
+              </button>
+            </div>
+          )}
           
           <header className="header-fixed px-5 pb-2">
             <div className="flex justify-between items-center pb-2 mt-2">
@@ -579,7 +642,7 @@
                       key={card.id} card={card} 
                       onPartialRedeem={() => setRedeemModal({ isOpen: true, cardId: card.id })}
                       onFullRedeem={() => handleFullRedeem(card.id)}
-                      onToggleGift={() => setGiftModal({ isOpen: true, card: card })} // NEU
+                      onToggleGift={() => setGiftModal({ isOpen: true, card: card })}
                       onEdit={() => openEditor(card)}
                       onFullscreen={() => setFullscreenCode(card)}
                       formatCurrency={(v) => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(v)}
@@ -601,7 +664,7 @@
                     <div key={card.id} className="opacity-75 grayscale hover:grayscale-0 transition-all duration-300">
                       <WalletCard 
                         card={card} 
-                        onToggleGift={() => toggleGiftedRestore(card.id)} // Rename func for Archive
+                        onToggleGift={() => toggleGiftedRestore(card.id)}
                         onRestore={() => setCards(cards.map(c => c.id === card.id ? {...c, isRedeemed: false, currentValue: c.initialValue} : c))}
                         onDelete={() => { if(window.confirm("Karte dauerhaft löschen?")) setCards(cards.filter(c => c.id !== card.id)) }}
                         onEdit={() => openEditor(card)}
@@ -675,7 +738,6 @@
             </div>
           )}
 
-          {/* DAS NEUE VERSCHENKEN (GIFT) MODAL */}
           {giftModal.isOpen && giftModal.card && (
             <div className="fixed inset-0 z-[150] flex items-end justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in" onClick={() => !isGeneratingPdf && setGiftModal({isOpen: false, card: null})}>
               <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-[2rem] p-6 shadow-2xl mb-4 slide-in-from-bottom-8" onClick={e => e.stopPropagation()}>
@@ -696,7 +758,7 @@
                      <Archive size={18} /> Nur im Archiv ablegen
                   </button>
                 </div>
-                <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6 leading-relaxed">Nach dem erfolgreichen Teilen wird die Karte automatisch in dein Archiv verschoben.</p>
+                <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-6 leading-relaxed">Nach dem Teilen wird die Karte automatisch in dein Archiv verschoben.</p>
               </div>
             </div>
           )}
